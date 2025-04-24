@@ -49,7 +49,7 @@ const createResponseFromTransport = async (
 
         // Let transport handle the request
         const res = new Response();
-        await transport.handleRequest(request, res, requestBody);
+        await transport.handleRequest(request as any, res as any, requestBody);
 
         return res;
     } catch (error) {

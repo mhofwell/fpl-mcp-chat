@@ -23,10 +23,7 @@ export async function GET(request: NextRequest) {
     try {
         const res = new Response();
 
-        await transport.handleRequest(
-            request as unknown as Request,
-            res as unknown as Response
-        );
+        await transport.handleRequest(request as any, res as any);
 
         return res;
     } catch (error) {

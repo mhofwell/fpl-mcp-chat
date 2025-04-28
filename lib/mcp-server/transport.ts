@@ -1,6 +1,9 @@
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { randomUUID } from 'crypto';
 
+// Get environment
+const appEnv = process.env.APP_ENV || 'development';
+
 // Create and configure transport
 export const createMcpTransport = () => {
     // Store active transport sessions
@@ -14,6 +17,9 @@ export const createMcpTransport = () => {
                 // Store the transport session
                 if (sessionId) {
                     sessions[sessionId] = transport;
+                    console.log(
+                        `Session ${sessionId} initialized in ${appEnv} environment`
+                    );
                 }
             },
         });
@@ -22,7 +28,9 @@ export const createMcpTransport = () => {
         transport.onclose = () => {
             if (transport.sessionId) {
                 delete sessions[transport.sessionId];
-                console.log(`Session ${transport.sessionId} closed`);
+                console.log(
+                    `Session ${transport.sessionId} closed in ${appEnv} environment`
+                );
             }
         };
 

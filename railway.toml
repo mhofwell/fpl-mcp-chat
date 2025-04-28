@@ -6,3 +6,12 @@ buildCommand = "npm run build"
 startCommand = "npm start"
 healthcheckPath = "/"
 healthcheckTimeout = 300
+
+[environments]
+  [environments.production]
+    APP_ENV = "production"
+    NODE_ENV = "production"
+  
+  [environments.preview]
+    APP_ENV = "preview"
+    NODE_ENV = "production"

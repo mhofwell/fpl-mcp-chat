@@ -6,6 +6,10 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
+// Get environment
+const appEnv = process.env.APP_ENV || 'development';
+const isDevMode = appEnv === 'development';
+
 // Helper to generate HTTP response from transport
 const createResponseFromTransport = async (
     sessionId: string | null,
@@ -13,6 +17,15 @@ const createResponseFromTransport = async (
     requestBody?: any
 ) => {
     try {
+        // Log request in development mode
+        if (isDevMode) {
+            console.log(`[DEV] MCP ${request.method} request:`, {
+                sessionId,
+                requestId: requestBody?.id,
+                method: requestBody?.method,
+            });
+        }
+
         let transport;
 
         if (sessionId && mcpTransport.getTransport(sessionId)) {
@@ -29,14 +42,23 @@ const createResponseFromTransport = async (
             // Create and connect server
             const server = await createMcpServer();
             await server.connect(transport);
+
+            if (isDevMode) {
+                console.log('[DEV] New MCP server and transport created');
+            }
         } else {
             // Invalid request
+            const errorMessage = 'Bad Request: No valid session ID provided';
+            if (isDevMode) {
+                console.error(`[DEV] MCP Error: ${errorMessage}`);
+            }
+
             return new Response(
                 JSON.stringify({
                     jsonrpc: '2.0',
                     error: {
                         code: -32000,
-                        message: 'Bad Request: No valid session ID provided',
+                        message: errorMessage,
                     },
                     id: null,
                 }),
@@ -51,9 +73,14 @@ const createResponseFromTransport = async (
         const res = new Response();
         await transport.handleRequest(request as any, res as any, requestBody);
 
+        // Log success in development mode
+        if (isDevMode) {
+            console.log('[DEV] MCP request handled successfully');
+        }
+
         return res;
     } catch (error) {
-        console.error('Error handling MCP request:', error);
+        console.error(`Error handling MCP request (${appEnv}):`, error);
         return new Response(
             JSON.stringify({
                 jsonrpc: '2.0',
@@ -104,12 +131,16 @@ export async function initializeMcpSession(formData: FormData) {
 
         if (responseData?.result?.session_id) {
             // Store session ID in a cookie
-            (await cookies()).set('mcp-session-id', responseData.result.session_id, {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
-                maxAge: 60 * 60 * 24, // 24 hours
-            });
+            (await cookies()).set(
+                'mcp-session-id',
+                responseData.result.session_id,
+                {
+                    httpOnly: true,
+                    secure: process.env.NODE_ENV === 'production',
+                    sameSite: 'strict',
+                    maxAge: 60 * 60 * 24, // 24 hours
+                }
+            );
 
             // Redirect to chat page
             redirect('/chat');

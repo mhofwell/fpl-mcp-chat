@@ -6,9 +6,6 @@ export async function GET(request: Request) {
     // by the SSR package. It exchanges an auth code for the user's session.
     // https://supabase.com/docs/guides/auth/server-side/nextjs
     const requestUrl = new URL(request.url);
-    console.log('Request URL:', requestUrl);
-    console.log('Origin:', requestUrl.origin);
-    console.log('Redirect to:', requestUrl.searchParams.get('redirect_to'));
     
     const code = requestUrl.searchParams.get('code');
     // Always use the public URL, not the request origin

@@ -1,22 +1,34 @@
 import Redis from 'ioredis';
 
-// Check if REDIS_URL is defined
-if (!process.env.REDIS_URL) {
-    console.warn(
-        'REDIS_URL is not defined. Using default Redis configuration.'
-    );
-}
+// Get environment variables
+const redisUrl = process.env.REDIS_URL;
+const appEnv = process.env.APP_ENV || 'development';
 
-// Create Redis client
-const redis = new Redis(process.env.REDIS_URL + '?family=0');
+// Configure Redis client based on environment
+const getRedisClient = () => {
+    // Default Redis configuration for local development
+    let redisConfig = 'redis://localhost:6379';
 
-// Handle connection errors
-redis.on('error', (err) => {
-    console.error('Redis connection error:', err);
-});
+    // Use REDIS_URL for Railway or other environments if available
+    if (redisUrl) {
+        redisConfig = redisUrl;
+    }
 
-redis.on('connect', () => {
-    console.log('Connected to Redis successfully');
-});
+    // Create and return Redis client
+    const client = new Redis(redisConfig);
 
+    // Log connection status based on environment
+    client.on('error', (err) => {
+        console.error(`Redis connection error (${appEnv}):`, err);
+    });
+
+    client.on('connect', () => {
+        console.log(`Connected to Redis successfully (${appEnv})`);
+    });
+
+    return client;
+};
+
+// Export Redis client
+const redis = getRedisClient();
 export default redis;

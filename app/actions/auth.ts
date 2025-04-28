@@ -2,8 +2,24 @@
 
 import { encodedRedirect } from '@/utils/utils';
 import { createClient } from '@/utils/supabase/server';
-import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+
+// Helper function to get the appropriate origin based on environment
+const getOrigin = () => {
+    // Check if we're in development mode based on APP_ENV
+    const isDevelopment =
+        (process.env.APP_ENV || 'development') === 'development';
+
+    // Use NEXT_PUBLIC_URL if explicitly set
+    if (process.env.NEXT_PUBLIC_URL) {
+        return process.env.NEXT_PUBLIC_URL;
+    }
+
+    // Otherwise, use environment-specific defaults
+    return isDevelopment
+        ? 'http://localhost:3000' // Local development URL
+        : 'https://fpl-mcp-chat-production.up.railway.app'; // Production URL
+};
 
 export const signUpAction = async (formData: FormData) => {
     const email = formData.get('email')?.toString();
@@ -11,9 +27,7 @@ export const signUpAction = async (formData: FormData) => {
     const full_name = formData.get('full_name')?.toString() || null;
 
     const supabase = await createClient();
-    const origin =
-        process.env.NEXT_PUBLIC_URL ||
-        'https://fpl-mcp-chat-production.up.railway.app';
+    const origin = getOrigin();
 
     if (!email || !password) {
         return encodedRedirect(
@@ -67,7 +81,7 @@ export const signInAction = async (formData: FormData) => {
 export const forgotPasswordAction = async (formData: FormData) => {
     const email = formData.get('email')?.toString();
     const supabase = await createClient();
-    const origin = (await headers()).get('origin');
+    const origin = getOrigin();
     const callbackUrl = formData.get('callbackUrl')?.toString();
 
     if (!email) {
@@ -109,7 +123,7 @@ export const resetPasswordAction = async (formData: FormData) => {
     const confirmPassword = formData.get('confirmPassword') as string;
 
     if (!password || !confirmPassword) {
-        encodedRedirect(
+        return encodedRedirect(
             'error',
             '/protected/reset-password',
             'Password and confirm password are required'
@@ -117,7 +131,7 @@ export const resetPasswordAction = async (formData: FormData) => {
     }
 
     if (password !== confirmPassword) {
-        encodedRedirect(
+        return encodedRedirect(
             'error',
             '/protected/reset-password',
             'Passwords do not match'
@@ -129,14 +143,18 @@ export const resetPasswordAction = async (formData: FormData) => {
     });
 
     if (error) {
-        encodedRedirect(
+        return encodedRedirect(
             'error',
             '/protected/reset-password',
             'Password update failed'
         );
     }
 
-    encodedRedirect('success', '/protected/reset-password', 'Password updated');
+    return encodedRedirect(
+        'success',
+        '/protected/reset-password',
+        'Password updated'
+    );
 };
 
 export const signOutAction = async () => {
@@ -145,115 +163,121 @@ export const signOutAction = async () => {
     return redirect('/sign-in');
 };
 
-// This is all new 
+// This is all new
 
 /**
  * Update user profile information
  */
 export const updateProfileAction = async (formData: FormData) => {
-  const supabase = await createClient();
-  
-  const username = formData.get("username")?.toString();
-  const full_name = formData.get("full_name")?.toString();
-  
-  // Get the current user
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (!user) {
+    const supabase = await createClient();
+
+    const username = formData.get('username')?.toString();
+    const full_name = formData.get('full_name')?.toString();
+
+    // Get the current user
+    const {
+        data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+        return encodedRedirect(
+            'error',
+            '/protected/profile',
+            'You must be signed in to update your profile.'
+        );
+    }
+
+    // First update the user metadata if full_name was provided
+    if (full_name) {
+        const { error: userUpdateError } = await supabase.auth.updateUser({
+            data: { full_name },
+        });
+
+        if (userUpdateError) {
+            return encodedRedirect(
+                'error',
+                '/protected/profile',
+                'Failed to update user metadata: ' + userUpdateError.message
+            );
+        }
+    }
+
+    // Then update the profile record
+    const updates = {
+        ...(username && { username }),
+        ...(full_name && { full_name }),
+    };
+
+    if (Object.keys(updates).length > 0) {
+        const { error: profileUpdateError } = await supabase
+            .from('profiles')
+            .update(updates)
+            .eq('id', user.id);
+
+        if (profileUpdateError) {
+            return encodedRedirect(
+                'error',
+                '/protected/profile',
+                'Failed to update profile: ' + profileUpdateError.message
+            );
+        }
+    }
+
     return encodedRedirect(
-      "error",
-      "/protected/profile",
-      "You must be signed in to update your profile."
+        'success',
+        '/protected/profile',
+        'Profile updated successfully.'
     );
-  }
-  
-  // First update the user metadata if full_name was provided
-  if (full_name) {
-    const { error: userUpdateError } = await supabase.auth.updateUser({
-      data: { full_name },
-    });
-    
-    if (userUpdateError) {
-      return encodedRedirect(
-        "error",
-        "/protected/profile",
-        "Failed to update user metadata: " + userUpdateError.message
-      );
-    }
-  }
-  
-  // Then update the profile record
-  const updates = {
-    ...(username && { username }),
-    ...(full_name && { full_name }),
-  };
-  
-  if (Object.keys(updates).length > 0) {
-    const { error: profileUpdateError } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('id', user.id);
-    
-    if (profileUpdateError) {
-      return encodedRedirect(
-        "error",
-        "/protected/profile",
-        "Failed to update profile: " + profileUpdateError.message
-      );
-    }
-  }
-  
-  return encodedRedirect(
-    "success",
-    "/protected/profile",
-    "Profile updated successfully."
-  );
 };
 
 /**
  * Update user preferences
  */
 export const updatePreferencesAction = async (formData: FormData) => {
-  const supabase = await createClient();
-  
-  const favorite_team_id = formData.get("favorite_team_id")?.toString();
-  const dark_mode = formData.get("dark_mode") === "true";
-  const email_notifications = formData.get("email_notifications") === "true";
-  
-  // Get the current user
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (!user) {
+    const supabase = await createClient();
+
+    const favorite_team_id = formData.get('favorite_team_id')?.toString();
+    const dark_mode = formData.get('dark_mode') === 'true';
+    const email_notifications = formData.get('email_notifications') === 'true';
+
+    // Get the current user
+    const {
+        data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+        return encodedRedirect(
+            'error',
+            '/protected/preferences',
+            'You must be signed in to update your preferences.'
+        );
+    }
+
+    // Update the preferences record
+    const updates = {
+        ...(favorite_team_id && {
+            favorite_team_id: parseInt(favorite_team_id),
+        }),
+        dark_mode,
+        email_notifications,
+    };
+
+    const { error } = await supabase
+        .from('user_preferences')
+        .update(updates)
+        .eq('id', user.id);
+
+    if (error) {
+        return encodedRedirect(
+            'error',
+            '/protected/preferences',
+            'Failed to update preferences: ' + error.message
+        );
+    }
+
     return encodedRedirect(
-      "error",
-      "/protected/preferences",
-      "You must be signed in to update your preferences."
+        'success',
+        '/protected/preferences',
+        'Preferences updated successfully.'
     );
-  }
-  
-  // Update the preferences record
-  const updates = {
-    ...(favorite_team_id && { favorite_team_id: parseInt(favorite_team_id) }),
-    dark_mode,
-    email_notifications,
-  };
-  
-  const { error } = await supabase
-    .from('user_preferences')
-    .update(updates)
-    .eq('id', user.id);
-  
-  if (error) {
-    return encodedRedirect(
-      "error",
-      "/protected/preferences",
-      "Failed to update preferences: " + error.message
-    );
-  }
-  
-  return encodedRedirect(
-    "success",
-    "/protected/preferences",
-    "Preferences updated successfully."
-  );
 };

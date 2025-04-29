@@ -1,4 +1,5 @@
 // components/layout/protected-nav.tsx
+'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, Settings, User, MessageSquare } from 'lucide-react';

@@ -84,14 +84,28 @@ export const cacheInvalidator = {
             deadlineDate.getTime() - now.getTime()
         );
 
-        // Schedule invalidation 1 minute after deadline
-        return setTimeout(async () => {
+        // Maximum safe timeout duration (about 24.8 days)
+        const MAX_TIMEOUT = 2147483647; // Max 32-bit signed integer
+
+        if (timeUntilDeadline <= MAX_TIMEOUT) {
+            // If within safe range, schedule normally
+            return setTimeout(async () => {
+                console.log(
+                    `Invalidating data after deadline for Gameweek ${gameweekId}`
+                );
+                await this.invalidateGameweekData(gameweekId);
+                await this.invalidatePlayerData();
+            }, timeUntilDeadline + 60000);
+        } else {
+            // For long timeouts, use an intermediate timer
             console.log(
-                `Invalidating data after deadline for Gameweek ${gameweekId}`
+                `Setting intermediate timer for GW${gameweekId} (${deadlineTime})`
             );
-            await this.invalidateGameweekData(gameweekId);
-            await this.invalidatePlayerData();
-        }, timeUntilDeadline + 60000);
+            return setTimeout(() => {
+                // Reschedule when we're closer to the deadline
+                this.scheduleDeadlineInvalidation(deadlineTime, gameweekId);
+            }, MAX_TIMEOUT);
+        }
     },
 
     /**

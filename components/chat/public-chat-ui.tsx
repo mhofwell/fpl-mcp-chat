@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { handleMcpRequest } from '@/app/actions/mcp';
+import { handleMcpRequest, initializeMcpSession } from '@/app/actions/mcp';
 import { Button } from "@/components/ui/button";
 
 interface Message {
@@ -13,7 +13,96 @@ export default function PublicChatUI() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [sessionInitialized, setSessionInitialized] = useState(false);
+  const [initError, setInitError] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const autoInitAttempted = useRef(false);
+
+  // Combined check session and auto-init on mount
+  useEffect(() => {
+    const initializeSession = async () => {
+      try {
+        // First check if session already exists
+        console.log("Checking for existing MCP session...");
+        const testRequest = {
+          jsonrpc: '2.0',
+          method: 'tools/list',
+          id: Date.now(),
+        };
+        
+        try {
+          const response = await handleMcpRequest(testRequest);
+          console.log("Session check response:", response);
+          
+          // If we don't get an error, session is valid
+          if (!response.error) {
+            console.log("Found existing valid session");
+            setSessionInitialized(true);
+            setIsInitializing(false);
+            return; // Exit early if session already exists
+          }
+        } catch (error) {
+          console.log('No active session found, auto-initializing', error);
+        }
+        
+        // Only attempt auto-init once
+        if (autoInitAttempted.current) return;
+        autoInitAttempted.current = true;
+        
+        console.log("Starting auto-initialization...");
+        // Create form data with no_redirect flag
+        const formData = new FormData();
+        formData.append('no_redirect', 'true');
+        
+        // Auto-initialize the session
+        const result = await initializeMcpSession(formData);
+        console.log("Auto-init result:", result);
+        
+        if (result.error) {
+          console.error('Auto-init error:', result.error);
+          setInitError(result.error);
+        } else {
+          console.log("Session initialized successfully");
+          setSessionInitialized(true);
+        }
+      } catch (error) {
+        console.error('Error auto-initializing session:', error);
+        setInitError('Failed to initialize chat session. Please try again.');
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+    
+    initializeSession();
+  }, []);
+
+  // Initialize MCP session (manual fallback)
+  const handleInitSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsInitializing(true);
+    setInitError('');
+    
+    try {
+      // Create form data with no_redirect flag
+      const formData = new FormData();
+      formData.append('no_redirect', 'true');
+      
+      // Call the server action to initialize the session
+      const result = await initializeMcpSession(formData);
+      
+      if (result.error) {
+        setInitError(result.error);
+      } else {
+        setSessionInitialized(true);
+      }
+    } catch (error) {
+      console.error('Error initializing session:', error);
+      setInitError('Failed to initialize chat session. Please try again.');
+    } finally {
+      setIsInitializing(false);
+    }
+  };
 
   // Scroll to bottom of messages
   useEffect(() => {
@@ -68,17 +157,60 @@ export default function PublicChatUI() {
       setMessages((prev) => [...prev, assistantMessageObj]);
     } catch (error) {
       console.error('Error getting response:', error);
-
-      // Add error message to UI
-      const errorMessageObj: Message = {
-        role: 'assistant',
-        content: 'Sorry, there was an error processing your request. Please try again.',
-      };
-      setMessages((prev) => [...prev, errorMessageObj]);
+      
+      // Check if this is a session error
+      if (error instanceof Error && error.message.includes('No session ID found')) {
+        setSessionInitialized(false);
+        setInitError('Your session has expired. Please restart the chat.');
+      } else {
+        // Add error message to UI
+        const errorMessageObj: Message = {
+          role: 'assistant',
+          content: 'Sorry, there was an error processing your request. Please try again.',
+        };
+        setMessages((prev) => [...prev, errorMessageObj]);
+      }
     } finally {
       setIsProcessing(false);
     }
   };
+
+  // Show session initialization UI if session is not initialized
+  if (!sessionInitialized) {
+    return (
+      <div className="flex flex-col h-[600px] w-full max-w-3xl mx-auto rounded-lg border bg-background shadow-sm">
+        <div className="border-b p-3">
+          <h3 className="font-semibold">FPL Chat Assistant</h3>
+          <p className="text-sm text-muted-foreground">
+            Initialize a chat session to begin
+          </p>
+        </div>
+        
+        <div className="flex-1 p-4 flex flex-col items-center justify-center">
+          <h2 className="text-xl font-semibold mb-4">Start a New Chat Session</h2>
+          <p className="text-muted-foreground mb-8 text-center max-w-md">
+            Click the button below to start a new chat session with the FPL Assistant
+          </p>
+          
+          {initError && (
+            <div className="p-3 mb-4 text-red-500 bg-red-50 rounded-md border border-red-200">
+              {initError}
+            </div>
+          )}
+          
+          <form onSubmit={handleInitSession}>
+            <Button 
+              type="submit" 
+              disabled={isInitializing}
+              className="px-6 py-2"
+            >
+              {isInitializing ? 'Initializing...' : 'Start Chat Session'}
+            </Button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-[600px] w-full max-w-3xl mx-auto rounded-lg border bg-background shadow-sm">

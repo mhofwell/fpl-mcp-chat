@@ -1,5 +1,5 @@
 import { Anthropic } from '@anthropic-ai/sdk';
-import { fplService } from '../fpl-api/service';
+import { fplApiService } from '../fpl-api/service';
 import { ExtractedEntities } from '../fpl-api/entity-extractor';
 
 // Get environment
@@ -48,7 +48,8 @@ export const claudeApi = {
 
             // Process the question to extract relevant FPL context if not provided
             if (!manualContext) {
-                const { context } = await fplService.processQuestion(question);
+                const { context } =
+                    await fplApiService.processQuestion(question);
                 fplContext = context;
             } else {
                 fplContext = manualContext;
@@ -56,8 +57,11 @@ export const claudeApi = {
 
             // Add default context if processed context is too short
             if (fplContext.length < 50) {
-                const currentGameweek = await fplService.getCurrentGameweek();
-                fplContext += `\nCurrent gameweek: ${currentGameweek?.name || 'Unknown'}\n`;
+                const currentGameweek =
+                    await fplApiService.getCurrentGameweek();
+                fplContext += `\nCurrent gameweek: ${
+                    currentGameweek?.name || 'Unknown'
+                }\n`;
             }
 
             // Log the request in development mode
@@ -134,7 +138,7 @@ export const claudeApi = {
         try {
             // Process the question to extract entities and build context
             const { context, entities } =
-                await fplService.processQuestion(question);
+                await fplApiService.processQuestion(question);
 
             // Get response from Claude
             const answer = await this.getResponse(question, context);

@@ -10,30 +10,17 @@ export const createMcpTransport = () => {
     const sessions: { [sessionId: string]: StreamableHTTPServerTransport } = {};
 
     // Create a new transport with session management
-    const createTransport = () => {
+    const createTransport = (sessionId: string): StreamableHTTPServerTransport => {
         const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
+            sessionIdGenerator: () => sessionId,
             onsessioninitialized: (sessionId) => {
-                // Store the transport session
-                if (sessionId) {
-                    sessions[sessionId] = transport;
-                    console.log(
-                        `Session ${sessionId} initialized in ${appEnv} environment`
-                    );
-                }
-            },
-        });
-
-        // Set up cleanup on close
-        transport.onclose = () => {
-            if (transport.sessionId) {
-                delete sessions[transport.sessionId];
-                console.log(
-                    `Session ${transport.sessionId} closed in ${appEnv} environment`
-                );
+                sessions[sessionId] = transport;
             }
-        };
-
+        });
+        
+        // Register immediately rather than waiting for the callback
+        sessions[sessionId] = transport;
+        
         return transport;
     };
 

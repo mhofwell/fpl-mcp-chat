@@ -20,6 +20,7 @@ import {
 } from './entity-extractor';
 import { fetchWithCache } from './cache-helper';
 import { cacheInvalidator } from './cache-invalidator';
+import { initializeServerMcpSession } from '../mcp-server/server-init';
 
 /**
  * Type for question processing result
@@ -568,8 +569,11 @@ export const fplApiService = {
             // Fetch gameweeks to set up scheduled invalidation
             const gameweeks = await this.getGameweeks();
 
-            // Set up invalidation schedule
+            // Set up invalidation schedule with proper timeout handling
             await cacheInvalidator.setupScheduledInvalidation(gameweeks);
+
+            // Initialize MCP server for server-side use
+            await initializeServerMcpSession();
 
             // Check if there's an active gameweek and set up more frequent invalidation
             const isActive = await this.isGameweekActive();

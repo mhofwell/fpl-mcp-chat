@@ -1,5 +1,5 @@
 // lib/jobs/fpl-data-sync.ts
-import { fplService } from '../fpl-api/service';
+import { fplApiService } from '../fpl-api/service';
 import { createClient } from '@/utils/supabase/server';
 import { Team, Player, Gameweek, Fixture } from '@/types/fpl';
 import { SupabaseClient } from '@supabase/supabase-js';
@@ -18,7 +18,7 @@ export async function syncFplData() {
 
     try {
         // First update Redis cache
-        await fplService.updateAllData();
+        await fplApiService.updateAllData();
 
         // Then update database
         await updateDatabaseFromCache();
@@ -50,10 +50,10 @@ async function updateDatabaseFromCache() {
     try {
         // Get all data from Redis cache (already formatted in our schema)
         const [teams, players, gameweeks, fixtures] = await Promise.all([
-            fplService.getTeams(),
-            fplService.getPlayers(),
-            fplService.getGameweeks(),
-            fplService.getFixtures(),
+            fplApiService.getTeams(),
+            fplApiService.getPlayers(),
+            fplApiService.getGameweeks(),
+            fplApiService.getFixtures(),
         ]);
 
         console.log(
@@ -210,19 +210,19 @@ async function updateFixtures(supabase: SupabaseClient, fixtures: Fixture[]) {
 export async function checkForUpdates() {
     try {
         // Check if gameweek is active (matches in progress)
-        const isActive = await fplService.isGameweekActive();
+        const isActive = await fplApiService.isGameweekActive();
 
         if (isActive) {
             console.log('Active gameweek detected, updating live data...');
 
             // If matches are in progress, update more frequently
-            const currentGameweek = await fplService.getCurrentGameweek();
+            const currentGameweek = await fplApiService.getCurrentGameweek();
             if (currentGameweek) {
                 // Update live data
-                await fplService.getLiveGameweek(currentGameweek.id);
+                await fplApiService.getLiveGameweek(currentGameweek.id);
 
                 // Also update fixtures to get latest match results
-                await fplService.getFixtures(currentGameweek.id);
+                await fplApiService.getFixtures(currentGameweek.id);
             }
         }
 

@@ -1,7 +1,7 @@
 // lib/mcp-server/index.ts
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { fplService } from '../fpl-api/service';
+import { fplApiService } from '../fpl-api/service';
 import { claudeApi } from '../claude-api/client';
 import { checkForUpdates } from '../fpl-api/fpl-data-sync';
 import { Fixture } from '@/types/fpl';
@@ -24,7 +24,7 @@ export const createMcpServer = async () => {
         async ({ team_name }) => {
             try {
                 // Get all teams
-                const teams = await fplService.getTeams();
+                const teams = await fplApiService.getTeams();
 
                 // Find the team by name (case insensitive)
                 const team = teams.find(
@@ -46,17 +46,18 @@ export const createMcpServer = async () => {
                 }
 
                 // Get players for this team
-                const players = await fplService.getPlayers({
+                const players = await fplApiService.getPlayers({
                     teamId: team.id,
                 });
 
                 // Get current gameweek
-                const currentGameweek = await fplService.getCurrentGameweek();
+                const currentGameweek =
+                    await fplApiService.getCurrentGameweek();
 
                 // Get upcoming fixtures
                 let fixtures: Fixture[] = [];
                 if (currentGameweek) {
-                    const allFixtures = await fplService.getFixtures();
+                    const allFixtures = await fplApiService.getFixtures();
 
                     // Get this team's fixtures for next 5 gameweeks
                     fixtures = allFixtures
@@ -126,7 +127,7 @@ export const createMcpServer = async () => {
         async ({ player_name }) => {
             try {
                 // Get all players
-                const players = await fplService.getPlayers();
+                const players = await fplApiService.getPlayers();
 
                 // Find the player by name (case insensitive)
                 const player = players.find(
@@ -151,12 +152,12 @@ export const createMcpServer = async () => {
                 }
 
                 // Get player details
-                const playerDetails = await fplService.getPlayerDetail(
+                const playerDetails = await fplApiService.getPlayerDetail(
                     player.id
                 );
 
                 // Get team info
-                const teams = await fplService.getTeams();
+                const teams = await fplApiService.getTeams();
                 const team = teams.find((t) => t.id === player.team_id);
 
                 // Format the response
@@ -208,7 +209,7 @@ export const createMcpServer = async () => {
 
                 if (gameweek_id) {
                     // Get all gameweeks and find the requested one
-                    const gameweeks = await fplService.getGameweeks();
+                    const gameweeks = await fplApiService.getGameweeks();
                     gameweek = gameweeks.find((gw) => gw.id === gameweek_id);
 
                     if (!gameweek) {
@@ -224,7 +225,7 @@ export const createMcpServer = async () => {
                     }
                 } else {
                     // Get current gameweek
-                    gameweek = await fplService.getCurrentGameweek();
+                    gameweek = await fplApiService.getCurrentGameweek();
 
                     if (!gameweek) {
                         return {
@@ -240,10 +241,10 @@ export const createMcpServer = async () => {
                 }
 
                 // Get fixtures for this gameweek
-                const fixtures = await fplService.getFixtures(gameweek.id);
+                const fixtures = await fplApiService.getFixtures(gameweek.id);
 
                 // Get teams to map IDs to names
-                const teams = await fplService.getTeams();
+                const teams = await fplApiService.getTeams();
 
                 // Format fixtures with team names
                 const formattedFixtures = fixtures.map((fixture) => {
@@ -384,7 +385,7 @@ export const createMcpServer = async () => {
                     };
                 } else {
                     // Just update Redis cache
-                    await fplService.updateAllData();
+                    await fplApiService.updateAllData();
                     return {
                         content: [
                             {
@@ -413,9 +414,9 @@ export const createMcpServer = async () => {
     server.resource('fpl-overview', 'fpl-data://overview', async () => {
         try {
             const [currentGameweek, teams, fixtures] = await Promise.all([
-                fplService.getCurrentGameweek(),
-                fplService.getTeams(),
-                fplService.getFixtures(),
+                fplApiService.getCurrentGameweek(),
+                fplApiService.getTeams(),
+                fplApiService.getFixtures(),
             ]);
 
             // Only include current/next gameweek fixtures

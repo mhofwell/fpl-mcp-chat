@@ -1,16 +1,23 @@
-import Hero from "@/components/hero";
-import ConnectSupabaseSteps from "@/components/tutorial/connect-supabase-steps";
-import SignUpUserSteps from "@/components/tutorial/sign-up-user-steps";
-import { hasEnvVars } from "@/utils/supabase/check-env-vars";
+import Navbar from "@/components/layout/navbar";
+import PublicChatUI from "@/components/chat/public-chat-ui";
 
 export default async function Home() {
   return (
     <>
-      <Hero />
-      <main className="flex-1 flex flex-col gap-6 px-4">
-        <h2 className="font-medium text-xl mb-4">Next steps</h2>
-        {hasEnvVars ? <SignUpUserSteps /> : <ConnectSupabaseSteps />}
-      </main>
+      <div className="w-full flex flex-col items-center">
+        <Navbar />
+        
+        <main className="flex-1 flex flex-col items-center w-full max-w-5xl px-4 py-8">
+          <h1 className="text-3xl font-bold mb-2 text-center">
+            Fantasy Premier League Chat Assistant
+          </h1>
+          <p className="text-lg text-muted-foreground mb-8 text-center max-w-2xl">
+            Get instant answers to all your FPL questions - stats, players, strategies, and more
+          </p>
+          
+          <PublicChatUI />
+        </main>
+      </div>
     </>
   );
 }

@@ -1,0 +1,126 @@
+// lib/fpl-api/cache-invalidator.ts
+import redis from '../redis/redis-client';
+
+/**
+ * FPL Cache Invalidation Service
+ *
+ * Uses an event-driven invalidation strategy targeted to FPL data patterns:
+ * - Gameweek transitions (pre/post deadline, post-gameweek)
+ * - Live data during matches
+ * - Player data when transfers are active
+ */
+export const cacheInvalidator = {
+    /**
+     * Invalidate specific cache keys
+     */
+    async invalidateKeys(keys: string[]): Promise<void> {
+        if (keys.length === 0) return;
+        await redis.del(...keys);
+    },
+
+    /**
+     * Invalidate all keys matching a pattern
+     */
+    async invalidatePattern(pattern: string): Promise<void> {
+        const keys = await redis.keys(pattern);
+        if (keys.length > 0) {
+            await this.invalidateKeys(keys);
+        }
+    },
+
+    /**
+     * Invalidate all FPL data (use sparingly)
+     */
+    async invalidateAllData(): Promise<void> {
+        await this.invalidatePattern('fpl:*');
+    },
+
+    /**
+     * Invalidate all player-related data
+     * Use after transfer windows or when player status changes
+     */
+    async invalidatePlayerData(): Promise<void> {
+        await Promise.all([
+            this.invalidatePattern('fpl:players*'),
+            this.invalidatePattern('fpl:player:*'),
+        ]);
+    },
+
+    /**
+     * Invalidate data for a specific gameweek
+     * Use when gameweek status changes (before/during/after)
+     */
+    async invalidateGameweekData(gameweekId: number): Promise<void> {
+        await Promise.all([
+            redis.del(`fpl:gameweek:${gameweekId}:live`),
+            redis.del(`fpl:fixtures:gw:${gameweekId}`),
+        ]);
+
+        // Also invalidate gameweeks list as current/next flags may change
+        await redis.del('fpl:gameweeks');
+    },
+
+    /**
+     * Invalidate live gameweek data only
+     * Use during active gameweeks to ensure fresh match data
+     */
+    async invalidateLiveData(gameweekId: number): Promise<void> {
+        await redis.del(`fpl:gameweek:${gameweekId}:live`);
+    },
+
+    /**
+     * Schedule invalidation for upcoming deadline
+     * @param deadlineTime ISO date string for the deadline
+     * @param gameweekId The gameweek ID to invalidate after deadline
+     */
+    scheduleDeadlineInvalidation(
+        deadlineTime: string,
+        gameweekId: number
+    ): NodeJS.Timeout {
+        const deadlineDate = new Date(deadlineTime);
+        const now = new Date();
+        const timeUntilDeadline = Math.max(
+            0,
+            deadlineDate.getTime() - now.getTime()
+        );
+
+        // Schedule invalidation 1 minute after deadline
+        return setTimeout(async () => {
+            console.log(
+                `Invalidating data after deadline for Gameweek ${gameweekId}`
+            );
+            await this.invalidateGameweekData(gameweekId);
+            await this.invalidatePlayerData();
+        }, timeUntilDeadline + 60000);
+    },
+
+    /**
+     * Set up scheduled invalidation based on gameweek deadlines
+     * Call this when server starts or when gameweek data is updated
+     */
+    async setupScheduledInvalidation(
+        gameweeks: any[]
+    ): Promise<NodeJS.Timeout[]> {
+        const timeouts: NodeJS.Timeout[] = [];
+        const now = new Date();
+
+        // Schedule invalidation for upcoming deadlines
+        for (const gw of gameweeks) {
+            const deadline = new Date(gw.deadline_time);
+
+            // Only schedule for future deadlines
+            if (deadline > now) {
+                const timeout = this.scheduleDeadlineInvalidation(
+                    gw.deadline_time,
+                    gw.id
+                );
+                timeouts.push(timeout);
+                console.log(
+                    `Scheduled invalidation for GW${gw.id} at ${gw.deadline_time}`
+                );
+            }
+        }
+
+        return timeouts;
+    },
+};

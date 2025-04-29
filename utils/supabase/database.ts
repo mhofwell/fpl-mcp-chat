@@ -241,7 +241,8 @@ export async function getUserPreferences() {
         return null;
     }
 
-    return data;
+    // Convert to plain object to ensure it's serializable for client components
+    return data ? JSON.parse(JSON.stringify(data)) : null;
 }
 
 export async function updateUserPreferences(updates: {

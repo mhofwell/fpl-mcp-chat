@@ -5,10 +5,15 @@ import { mcpTransport } from '@/lib/mcp-server/transport';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { checkForUpdates } from '@/lib/fpl-api/fpl-data-sync';
+import { fplService } from '@/lib/fpl-api/service';
 
 // Get environment
 const appEnv = process.env.APP_ENV || 'development';
 const isDevMode = appEnv === 'development';
+
+// Global variable to track if FPL service has been initialized
+let fplServiceInitialized = false;
 
 // Helper to generate HTTP response from transport
 const createResponseFromTransport = async (
@@ -17,6 +22,15 @@ const createResponseFromTransport = async (
     requestBody?: any
 ) => {
     try {
+        // Initialize FPL service if not already done (only once per server instance)
+        if (!fplServiceInitialized) {
+            await fplService.initialize();
+            // Also check for any updates (especially during active gameweeks)
+            await checkForUpdates();
+            fplServiceInitialized = true;
+            console.log('FPL service initialized and updates checked');
+        }
+        
         // Log request in development mode
         if (isDevMode) {
             console.log(`[DEV] MCP ${request.method} request:`, {

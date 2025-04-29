@@ -1,62 +1,72 @@
-# Database Setup Instructions
+# FPL Chat Assistant
 
-This README explains how to set up the database for the Fantasy Premier League Chat Assistant.
+This application provides a chat interface for Fantasy Premier League (FPL) data and insights using Claude AI.
 
 ## Prerequisites
 
-1. A Supabase project created at [https://supabase.com](https://supabase.com)
-2. Node.js version 18 or higher
-3. `.env.local` file configured with your Supabase credentials:
-    ```
-    NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-    SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
-    ```
+1. Node.js (v18+)
+2. Redis installed locally
+3. Supabase account with a project set up
+4. Claude API key
 
-## Step 1: Create an Exec SQL Function
+## Environment Setup
 
-Before you can run the database setup, you need to create a PostgreSQL function in your Supabase project that allows executing SQL statements.
+Create a `.env.local` file in the project root with the following variables:
 
-1. Go to your Supabase project dashboard
-2. Navigate to SQL Editor
-3. Create a new query
-4. Copy the contents of `scripts/exec_sql_function.sql` into the editor
-5. Run the query
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+REDIS_URL=redis://localhost:6379
+APP_ENV=development
+NODE_ENV=development
+CLAUDE_API_KEY=your_claude_api_key
 
-## Step 2: Set Up the Database Schema
+## Setup Workflow
 
-Run the following command to set up the database schema:
+### 1. Drop All Tables (If Needed)
+
+To reset the database completely:
+
+```bash
+npm run db:drop
+```
+
+### 2. Setup the Database
+
+Run the database setup script to create all the necessary tables and policies:
 
 ```bash
 npm run db:setup
 ```
 
 This will:
-
+- Create the exec_sql_function in Supabase (now integrated into the setup script)
 - Create all required tables: teams, players, gameweeks, fixtures, profiles, user_preferences, chats, messages
 - Set up RLS policies to secure the data
 - Create triggers and functions for user management
 
-## Step 3: Seed the Database with Fantasy Premier League Data
+### 3. Seed the Database with Fantasy Premier League Data
 
-Run the following command to populate the database with data from the Fantasy Premier League API:
+Populate the database with data from the FPL API:
 
 ```bash
 npm run db:seed
 ```
 
 This will:
-
 - Fetch teams, players, gameweeks, and fixtures from the FPL API
 - Insert or update the records in the database
 
-## Step 4: Complete Reset (Optional)
-
-If you want to reset the database and reseed it with fresh data:
+### 4. Start the Development Server
 
 ```bash
-npm run db:reset
+npm run dev:local
 ```
+
+This script will:
+- Check if Redis is installed
+- Start Redis if it's not already running
+- Start the Next.js development server
 
 ## Verifying Setup
 
@@ -71,18 +81,32 @@ After setup, you should see the following tables in your Supabase dashboard:
 - chats
 - messages
 
-## Troubleshooting
+## Common Issues & Troubleshooting
 
-If you encounter issues:
+### Database Setup Issues
 
-1. Check your environment variables are correctly set
-2. Verify you have the required permissions in your Supabase project
-3. Look at the console output for error messages
-4. Check that your database doesn't have conflicting table structures
+1. **Missing environment variables**: Ensure all Supabase credentials are correct in .env.local
+2. **Permission issues**: Verify you have the required permissions in your Supabase project
+3. **SQL errors**: Check the console output for specific error messages
 
-## Notes for Railway Deployment
+### Seed Script Issues
+
+1. **Import errors**: If you see errors related to importing `fplApiService`, ensure there are no `.ts` extensions in import statements
+2. **API rate limiting**: The seed script includes delays to prevent overwhelming the FPL API
+
+### Redis Issues
+
+1. **Redis not installed**: Install Redis using `brew install redis` (macOS) or `apt install redis-server` (Ubuntu)
+2. **Redis connection errors**: Verify Redis is running with `redis-cli ping` and check your REDIS_URL is correct
+
+### Next.js Issues
+
+1. **Port conflicts**: If port 3000 is in use, you can use `npm run dev -- -p 3001` to change the port
+
+## Deployment
 
 When deploying to Railway:
 
-- Make sure to add all required environment variables to your Railway project
+- Add all required environment variables to your Railway project
+- Set up Redis as a service
 - The database setup scripts can be run as part of your deployment process

@@ -61,6 +61,21 @@ async function setupDatabase() {
             await clearDatabaseData();
         }
 
+        // Execute the exec_sql_function.sql first
+        console.log('Creating exec_sql function...');
+        const { error: funcError } = await executeSQL(
+            supabase,
+            fs.readFileSync(
+                path.join(process.cwd(), 'scripts', 'exec_sql_function.sql'),
+                'utf8'
+            )
+        );
+
+        if (funcError) {
+            console.error('Error creating exec_sql function:', funcError);
+            throw funcError;
+        }
+
         // Execute the migration SQL file without parsing
         console.log('Executing migration.sql...');
         const { error } = await executeSQL(

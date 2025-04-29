@@ -190,3 +190,21 @@ FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
 CREATE TRIGGER update_chats_updated_at
 BEFORE UPDATE ON chats
 FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+
+-- Create storage bucket for avatars if it doesn't exist
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('avatars', 'avatars', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Set up storage policies for avatars
+CREATE POLICY "Users can view all avatars"
+ON storage.objects FOR SELECT
+USING (bucket_id = 'avatars');
+
+CREATE POLICY "Users can upload their own avatars"
+ON storage.objects FOR INSERT
+WITH CHECK (bucket_id = 'avatars' AND (auth.uid())::text = SPLIT_PART(name, '-', 1));
+
+CREATE POLICY "Users can update their own avatars"
+ON storage.objects FOR UPDATE
+USING (bucket_id = 'avatars' AND (auth.uid())::text = SPLIT_PART(name, '-', 1));

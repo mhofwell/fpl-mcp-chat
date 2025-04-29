@@ -1,7 +1,7 @@
 // lib/fpl-api/service.ts
 import { fplApi } from './client';
 import redis from '../redis/redis-client';
-import { Team, Player, Gameweek, Fixture } from '@/types/fpl';
+import { Team, Player, Gameweek, Fixture } from '../../types/fpl';
 
 /**
  * Wrapper service for FPL API calls with Redis caching

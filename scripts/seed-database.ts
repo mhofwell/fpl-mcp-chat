@@ -1,6 +1,6 @@
 // scripts/seed-database.ts
 import { createClient } from '@supabase/supabase-js';
-import { fplApiService } from '../lib/fpl-api/service';
+import { fplApiService } from '../lib/fpl-api/service.ts';
 import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config({ path: '.env.local' });

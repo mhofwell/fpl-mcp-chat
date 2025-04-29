@@ -1,104 +1,88 @@
-<a href="https://demo-nextjs-with-supabase.vercel.app/">
-  <img alt="Next.js and Supabase Starter Kit - the fastest way to build apps with Next.js and Supabase" src="https://demo-nextjs-with-supabase.vercel.app/opengraph-image.png">
-  <h1 align="center">Next.js and Supabase Starter Kit</h1>
-</a>
+# Database Setup Instructions
 
-<p align="center">
- The fastest way to build apps with Next.js and Supabase
-</p>
+This README explains how to set up the database for the Fantasy Premier League Chat Assistant.
 
-<p align="center">
-  <a href="#features"><strong>Features</strong></a> ·
-  <a href="#demo"><strong>Demo</strong></a> ·
-  <a href="#deploy-to-vercel"><strong>Deploy to Vercel</strong></a> ·
-  <a href="#clone-and-run-locally"><strong>Clone and run locally</strong></a> ·
-  <a href="#feedback-and-issues"><strong>Feedback and issues</strong></a>
-  <a href="#more-supabase-examples"><strong>More Examples</strong></a>
-</p>
-<br/>
+## Prerequisites
 
-## Features
+1. A Supabase project created at [https://supabase.com](https://supabase.com)
+2. Node.js version 18 or higher
+3. `.env.local` file configured with your Supabase credentials:
+    ```
+    NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+    SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+    ```
 
-- Works across the entire [Next.js](https://nextjs.org) stack
-  - App Router
-  - Pages Router
-  - Middleware
-  - Client
-  - Server
-  - It just works!
-- supabase-ssr. A package to configure Supabase Auth to use cookies
-- Styling with [Tailwind CSS](https://tailwindcss.com)
-- Components with [shadcn/ui](https://ui.shadcn.com/)
-- Optional deployment with [Supabase Vercel Integration and Vercel deploy](#deploy-your-own)
-  - Environment variables automatically assigned to Vercel project
+## Step 1: Create an Exec SQL Function
 
-## Demo
+Before you can run the database setup, you need to create a PostgreSQL function in your Supabase project that allows executing SQL statements.
 
-You can view a fully working demo at [demo-nextjs-with-supabase.vercel.app](https://demo-nextjs-with-supabase.vercel.app/).
+1. Go to your Supabase project dashboard
+2. Navigate to SQL Editor
+3. Create a new query
+4. Copy the contents of `scripts/exec_sql_function.sql` into the editor
+5. Run the query
 
-## Deploy to Vercel
+## Step 2: Set Up the Database Schema
 
-Vercel deployment will guide you through creating a Supabase account and project.
+Run the following command to set up the database schema:
 
-After installation of the Supabase integration, all relevant environment variables will be assigned to the project so the deployment is fully functioning.
+```bash
+npm run db:setup
+```
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&project-name=nextjs-with-supabase&repository-name=nextjs-with-supabase&demo-title=nextjs-with-supabase&demo-description=This+starter+configures+Supabase+Auth+to+use+cookies%2C+making+the+user%27s+session+available+throughout+the+entire+Next.js+app+-+Client+Components%2C+Server+Components%2C+Route+Handlers%2C+Server+Actions+and+Middleware.&demo-url=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2F&external-id=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&demo-image=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2Fopengraph-image.png)
+This will:
 
-The above will also clone the Starter kit to your GitHub, you can clone that locally and develop locally.
+- Create all required tables: teams, players, gameweeks, fixtures, profiles, user_preferences, chats, messages
+- Set up RLS policies to secure the data
+- Create triggers and functions for user management
 
-If you wish to just develop locally and not deploy to Vercel, [follow the steps below](#clone-and-run-locally).
+## Step 3: Seed the Database with Fantasy Premier League Data
 
-## Clone and run locally
+Run the following command to populate the database with data from the Fantasy Premier League API:
 
-1. You'll first need a Supabase project which can be made [via the Supabase dashboard](https://database.new)
+```bash
+npm run db:seed
+```
 
-2. Create a Next.js app using the Supabase Starter template npx command
+This will:
 
-   ```bash
-   npx create-next-app --example with-supabase with-supabase-app
-   ```
+- Fetch teams, players, gameweeks, and fixtures from the FPL API
+- Insert or update the records in the database
 
-   ```bash
-   yarn create next-app --example with-supabase with-supabase-app
-   ```
+## Step 4: Complete Reset (Optional)
 
-   ```bash
-   pnpm create next-app --example with-supabase with-supabase-app
-   ```
+If you want to reset the database and reseed it with fresh data:
 
-3. Use `cd` to change into the app's directory
+```bash
+npm run db:reset
+```
 
-   ```bash
-   cd with-supabase-app
-   ```
+## Verifying Setup
 
-4. Rename `.env.example` to `.env.local` and update the following:
+After setup, you should see the following tables in your Supabase dashboard:
 
-   ```
-   NEXT_PUBLIC_SUPABASE_URL=[INSERT SUPABASE PROJECT URL]
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=[INSERT SUPABASE PROJECT API ANON KEY]
-   ```
+- teams
+- players
+- gameweeks
+- fixtures
+- profiles
+- user_preferences
+- chats
+- messages
 
-   Both `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` can be found in [your Supabase project's API settings](https://app.supabase.com/project/_/settings/api)
+## Troubleshooting
 
-5. You can now run the Next.js local development server:
+If you encounter issues:
 
-   ```bash
-   npm run dev
-   ```
+1. Check your environment variables are correctly set
+2. Verify you have the required permissions in your Supabase project
+3. Look at the console output for error messages
+4. Check that your database doesn't have conflicting table structures
 
-   The starter kit should now be running on [localhost:3000](http://localhost:3000/).
+## Notes for Railway Deployment
 
-6. This template comes with the default shadcn/ui style initialized. If you instead want other ui.shadcn styles, delete `components.json` and [re-install shadcn/ui](https://ui.shadcn.com/docs/installation/next)
+When deploying to Railway:
 
-> Check out [the docs for Local Development](https://supabase.com/docs/guides/getting-started/local-development) to also run Supabase locally.
-
-## Feedback and issues
-
-Please file feedback and issues over on the [Supabase GitHub org](https://github.com/supabase/supabase/issues/new/choose).
-
-## More Supabase examples
-
-- [Next.js Subscription Payments Starter](https://github.com/vercel/nextjs-subscription-payments)
-- [Cookie-based Auth and the Next.js 13 App Router (free course)](https://youtube.com/playlist?list=PL5S4mPUpp4OtMhpnp93EFSo42iQ40XjbF)
-- [Supabase Auth and the Next.js App Router](https://github.com/supabase/supabase/tree/master/examples/auth/nextjs)
+- Make sure to add all required environment variables to your Railway project
+- The database setup scripts can be run as part of your deployment process

@@ -44,11 +44,13 @@ class McpClientError extends Error {
  * Check if the session is currently valid
  */
 export async function checkMcpSession(): Promise<boolean> {
-    // If we don't have a stored session ID, don't even try to check
+    // First check if we have a session ID in localStorage - if not, don't even try
     const sessionId = localStorage.getItem('mcp-session-id');
     if (!sessionId) {
+        console.log('No session ID found in localStorage');
         return false;
     }
+
     try {
         const testRequest = {
             jsonrpc: '2.0',
@@ -60,8 +62,9 @@ export async function checkMcpSession(): Promise<boolean> {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Accept': 'application/json, text/event-stream',
-                'mcp-session-id': localStorage.getItem('mcp-session-id') || '',
+                'Accept': 'application/json',
+                // Include the session ID
+                'mcp-session-id': sessionId,
             },
             body: JSON.stringify(testRequest),
         });
@@ -87,7 +90,7 @@ export async function initializeMcpSession(): Promise<string> {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Accept': 'application/json, text/event-stream',
+                'Accept': 'application/json',
             },
         });
 
@@ -110,7 +113,7 @@ export async function initializeMcpSession(): Promise<string> {
             );
         }
 
-        // Store the session ID for future use
+        // Store the session ID in localStorage for future use
         localStorage.setItem('mcp-session-id', result.session_id);
 
         return result.session_id;

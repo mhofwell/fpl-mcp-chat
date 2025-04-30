@@ -1,4 +1,13 @@
 // lib/mcp-client/index.ts
+import {
+    initMcpClient,
+    isMcpClientInitialized,
+    closeMcpClient,
+    terminateMcpSession,
+} from './transport';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { z } from 'zod';
 /**
  * Client utilities for interacting with MCP server
  */
@@ -18,13 +27,12 @@ interface McpRequestOptions {
 interface McpToolCallOptions {
     name: string;
     arguments: any;
-    requestId?: number | string;
 }
 
 /**
  * Standard error response for MCP client errors
  */
-class McpClientError extends Error {
+export class McpClientError extends Error {
     code: number;
     requestId: string | number | null;
 
@@ -44,37 +52,19 @@ class McpClientError extends Error {
  * Check if the session is currently valid
  */
 export async function checkMcpSession(): Promise<boolean> {
-    // First check if we have a session ID in localStorage - if not, don't even try
-    const sessionId = localStorage.getItem('mcp-session-id');
-    if (!sessionId) {
-        console.log('No session ID found in localStorage');
-        return false;
-    }
-
     try {
-        const testRequest = {
-            jsonrpc: '2.0',
-            method: 'tools/list',
-            id: Date.now(),
-        };
+        if (!isMcpClientInitialized()) {
+            // Try to initialize with existing session ID
+            const sessionId = localStorage.getItem('mcp-session-id');
+            if (!sessionId) {
+                return false;
+            }
 
-        const response = await fetch('/api/mcp', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                // Include the session ID
-                'mcp-session-id': sessionId,
-            },
-            body: JSON.stringify(testRequest),
-        });
-
-        if (!response.ok) {
-            return false;
+            // This will try to use the existing session ID and connect
+            await initMcpClient();
+            return true;
         }
-
-        const result = await response.json();
-        return !result.error;
+        return true;
     } catch (error) {
         console.error('Error checking MCP session:', error);
         return false;
@@ -86,37 +76,25 @@ export async function checkMcpSession(): Promise<boolean> {
  */
 export async function initializeMcpSession(): Promise<string> {
     try {
-        const response = await fetch('/api/mcp/init', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-            },
-        });
+        // Close any existing client first
+        await closeMcpClient();
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new McpClientError(
-                `Failed to initialize session: ${errorText}`
-            );
-        }
+        // Remove any existing session ID
+        localStorage.removeItem('mcp-session-id');
 
-        const result = await response.json();
+        // Initialize a new client (will get a new session ID)
+        const client = await initMcpClient();
 
-        if (result.error) {
-            throw new McpClientError(result.error);
-        }
-
-        if (!result.session_id) {
+        // Get the session ID from the transport
+        const sessionId = (client.transport as StreamableHTTPClientTransport)
+            .sessionId;
+        if (!sessionId) {
             throw new McpClientError(
                 'No session ID returned from initialization'
             );
         }
 
-        // Store the session ID in localStorage for future use
-        localStorage.setItem('mcp-session-id', result.session_id);
-
-        return result.session_id;
+        return sessionId;
     } catch (error) {
         if (error instanceof McpClientError) {
             throw error;
@@ -190,21 +168,38 @@ export async function sendMcpRequest<T = any>(
 }
 
 /**
- * Call an MCP tool
+ * Call an MCP tool using direct API request (bypassing validation)
  */
 export async function callMcpTool<T = any>(
     options: McpToolCallOptions
 ): Promise<T> {
-    const { name, arguments: args, requestId } = options;
+    try {
+        // Ensure client is initialized
+        const client = await initMcpClient();
 
-    return sendMcpRequest({
-        method: 'tools/call',
-        params: {
-            name,
-            arguments: args,
-        },
-        requestId,
-    });
+        // Use the direct request method to avoid schema validation issues
+        const result = await client.request(
+            {
+                method: 'tools/call',
+                params: {
+                    name: options.name,
+                    arguments: options.arguments,
+                },
+            },
+            CallToolResultSchema
+        );
+
+        return result as T;
+    } catch (error) {
+        if (error instanceof McpClientError) {
+            throw error;
+        }
+
+        // Handle and convert errors
+        throw new McpClientError(
+            `Error calling MCP tool: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
 }
 
 /**
@@ -230,6 +225,20 @@ export async function getFplAnswer(
             result.content.length > 0
         ) {
             return result.content[0].text;
+        }
+
+        // Fallback: try different result formats
+        if (result && typeof result === 'object') {
+            if (typeof result.text === 'string') {
+                return result.text;
+            }
+
+            if (typeof result.content === 'string') {
+                return result.content;
+            }
+
+            // Last resort - stringify
+            return JSON.stringify(result);
         }
 
         return "Sorry, I couldn't find an answer.";

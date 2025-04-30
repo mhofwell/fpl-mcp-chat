@@ -24,54 +24,52 @@ export default function ImprovedChatUI() {
     const autoInitAttempted = useRef(false);
 
     // Check session and auto-init on mount
-    useEffect(() => {
-        const initializeSession = async () => {
-            try {
-                // Don't even try to check for a session if we don't have a session ID in localStorage
-                const sessionId = localStorage.getItem('mcp-session-id');
-                let hasValidSession = false;
-
-                if (sessionId) {
-                    console.log(
-                        'Found session ID in localStorage, checking validity...'
-                    );
-                    hasValidSession = await checkMcpSession();
-                }
-
-                if (hasValidSession) {
-                    console.log('Found existing valid session');
-                    setSessionInitialized(true);
-                    setIsInitializing(false);
-                    return;
-                }
-
-                // Only attempt auto-init once
-                if (autoInitAttempted.current) {
-                    setIsInitializing(false);
-                    return;
-                }
-
-                autoInitAttempted.current = true;
-                console.log('Starting auto-initialization...');
-
-                // Auto-initialize the session
-                await initializeMcpSession();
-                console.log('Session initialized successfully');
-                setSessionInitialized(true);
-            } catch (error) {
-                console.error('Error during session initialization:', error);
-                const errorMessage =
-                    error instanceof Error ? error.message : 'Unknown error';
-                setInitError(
-                    `Failed to initialize chat session: ${errorMessage}`
-                );
-            } finally {
-                setIsInitializing(false);
+useEffect(() => {
+    const initializeSession = async () => {
+        try {
+            // Don't even try to check for a session if we don't have a session ID in localStorage
+            const sessionId = localStorage.getItem('mcp-session-id');
+            let hasValidSession = false;
+            
+            if (sessionId) {
+                console.log('Found session ID in localStorage, checking validity...');
+                hasValidSession = await checkMcpSession();
             }
-        };
 
-        initializeSession();
-    }, []);
+            if (hasValidSession) {
+                console.log('Found existing valid session');
+                setSessionInitialized(true);
+                setIsInitializing(false);
+                return;
+            }
+
+            // Only attempt auto-init once
+            if (autoInitAttempted.current) {
+                setIsInitializing(false);
+                return;
+            }
+
+            autoInitAttempted.current = true;
+            console.log('Starting auto-initialization...');
+
+            // Auto-initialize the session
+            await initializeMcpSession();
+            console.log('Session initialized successfully');
+            setSessionInitialized(true);
+        } catch (error) {
+            console.error('Error during session initialization:', error);
+            const errorMessage =
+                error instanceof Error ? error.message : 'Unknown error';
+            setInitError(
+                `Failed to initialize chat session: ${errorMessage}`
+            );
+        } finally {
+            setIsInitializing(false);
+        }
+    };
+
+    initializeSession();
+}, []);
 
     // Initialize MCP session (manual fallback)
     const handleInitSession = async (e: React.FormEvent) => {

@@ -38,15 +38,33 @@ export async function POST(request: NextRequest) {
         const requestBody = await request.json();
 
         console.log('Request body:', requestBody);
+        console.log('Session ID:', sessionId);
 
         let transport;
 
-        if (sessionId && mcpTransport.getTransport(sessionId)) {
-            // Reuse existing transport
+        if (sessionId) {
+            // Log what transports are available
+            console.log('Active sessions:', mcpTransport.getActiveSessions());
+
             transport = mcpTransport.getTransport(sessionId);
-        } else if (!sessionId && isInitializeRequest(requestBody)) {
+            if (transport) {
+                // Reuse existing transport
+                console.log('Found existing transport for session:', sessionId);
+            } else {
+                console.log(
+                    'No transport found, creating new one for:',
+                    sessionId
+                );
+                // Create and register a new transport with the existing ID
+                transport = mcpTransport.createTransport(sessionId);
+
+                // Create and connect server (this is important!)
+                const server = await createMcpServer();
+                await server.connect(transport);
+            }
+        } else if (isInitializeRequest(requestBody)) {
             // For initialize requests with no session
-            // Create new transport for initialize request
+            console.log('Processing initialize request with no session');
             const newSessionId = randomUUID();
             transport = mcpTransport.createTransport(newSessionId);
 
@@ -55,6 +73,9 @@ export async function POST(request: NextRequest) {
             await server.connect(transport);
         } else {
             // Invalid request
+            console.log(
+                'Invalid request: No session ID and not an initialize request'
+            );
             return NextResponse.json(
                 {
                     jsonrpc: '2.0',
@@ -239,7 +260,11 @@ export async function DELETE(request: NextRequest) {
         (transport as any).disconnect();
 
         // Clear cookie in response
-        const response = NextResponse.json({ success: true });
+        const response = NextResponse.json({
+            jsonrpc: '2.0',
+            result: { success: true },
+            id: 'delete-' + Date.now(), // Always provide a valid ID
+        });
         response.cookies.delete('mcp-session-id');
 
         return response;
@@ -249,68 +274,5 @@ export async function DELETE(request: NextRequest) {
             { error: 'Internal server error' },
             { status: 500 }
         );
-    }
-}
-
-// Helper: Create mock response object
-function createMockResponse(
-    headers: Headers,
-    writer: WritableStreamDefaultWriter<Uint8Array>
-) {
-    const headersObject = Object.fromEntries(headers.entries());
-    const acceptHeader = 'application/json, text/event-stream';
-
-    const mockResponse = {
-        writeHead: function (status: number, resHeaders: any) {
-            return mockResponse;
-        },
-        setHeader: function (name: string, value: string) {
-            return mockResponse;
-        },
-        getHeader: function (name: string) {
-            return headersObject[name.toLowerCase()] || acceptHeader;
-        },
-        write: async function (chunk: string) {
-            await writer.write(new TextEncoder().encode(chunk));
-            return mockResponse;
-        },
-        end: async function (chunk?: string) {
-            if (chunk) {
-                await writer.write(new TextEncoder().encode(chunk));
-            }
-            await writer.close();
-            return mockResponse;
-        },
-    };
-
-    return mockResponse;
-}
-
-// Helper: Read and parse response stream
-async function readResponseStream(readable: ReadableStream): Promise<any> {
-    const reader = readable.getReader();
-    const chunks: Uint8Array[] = [];
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-    }
-
-    const responseText = new TextDecoder().decode(
-        chunks.reduce((acc, chunk) => {
-            const newBuffer = new Uint8Array(acc.length + chunk.length);
-            newBuffer.set(acc);
-            newBuffer.set(chunk, acc.length);
-            return newBuffer;
-        }, new Uint8Array(0))
-    );
-
-    try {
-        return JSON.parse(responseText);
-    } catch (err) {
-        console.error('Failed to parse response:', err);
-        console.log('Raw response text:', responseText);
-        throw new Error('Failed to parse response');
     }
 }

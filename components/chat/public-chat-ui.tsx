@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { handleMcpRequest, initializeMcpSession } from '@/app/actions/mcp';
 import { Button } from "@/components/ui/button";
+import { useRouter } from 'next/navigation';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -18,6 +19,7 @@ export default function PublicChatUI() {
   const [initError, setInitError] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const autoInitAttempted = useRef(false);
+  const router = useRouter();
 
   // Combined check session and auto-init on mount
   useEffect(() => {
@@ -32,11 +34,19 @@ export default function PublicChatUI() {
         };
         
         try {
-          const response = await handleMcpRequest(testRequest);
-          console.log("Session check response:", response);
+          const response = await fetch('/api/mcp', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json, text/event-stream'
+            },
+            body: JSON.stringify(testRequest),
+          });
+          const result = await response.json();
+          console.log("Session check response:", result);
           
           // If we don't get an error, session is valid
-          if (!response.error) {
+          if (!result.error) {
             console.log("Found existing valid session");
             setSessionInitialized(true);
             setIsInitializing(false);
@@ -54,14 +64,21 @@ export default function PublicChatUI() {
         // Create form data with no_redirect flag
         const formData = new FormData();
         formData.append('no_redirect', 'true');
-        
+
         // Auto-initialize the session
-        const result = await initializeMcpSession(formData);
-        console.log("Auto-init result:", result);
-        
-        if (result.error) {
-          console.error('Auto-init error:', result.error);
-          setInitError(result.error);
+        const initResponse = await fetch('/api/mcp/init', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/event-stream'
+          },
+        });
+        const initResult = await initResponse.json();
+        console.log('Auto-init result:', initResult);
+
+        if (initResult.error) {
+          console.error('Auto-init error:', initResult.error);
+          setInitError(initResult.error);
         } else {
           console.log("Session initialized successfully");
           setSessionInitialized(true);
@@ -89,7 +106,14 @@ export default function PublicChatUI() {
       formData.append('no_redirect', 'true');
       
       // Call the server action to initialize the session
-      const result = await initializeMcpSession(formData);
+      const initResponse = await fetch('/api/mcp/init', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream'
+        },
+      });
+      const result = await initResponse.json();
       
       if (result.error) {
         setInitError(result.error);
@@ -140,7 +164,14 @@ export default function PublicChatUI() {
         id: Date.now(),
       };
 
-      const response = await handleMcpRequest(requestData);
+      const response = await fetch('/api/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream'
+        },
+        body: JSON.stringify(requestData),
+      });
 
       if (response.error) {
         throw new Error(response.error);

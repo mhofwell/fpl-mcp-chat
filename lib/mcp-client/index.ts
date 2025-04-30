@@ -44,6 +44,11 @@ class McpClientError extends Error {
  * Check if the session is currently valid
  */
 export async function checkMcpSession(): Promise<boolean> {
+    // If we don't have a stored session ID, don't even try to check
+    const sessionId = localStorage.getItem('mcp-session-id');
+    if (!sessionId) {
+        return false;
+    }
     try {
         const testRequest = {
             jsonrpc: '2.0',
@@ -55,7 +60,8 @@ export async function checkMcpSession(): Promise<boolean> {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                Accept: 'application/json',
+                'Accept': 'application/json, text/event-stream',
+                'mcp-session-id': localStorage.getItem('mcp-session-id') || '',
             },
             body: JSON.stringify(testRequest),
         });
@@ -81,7 +87,7 @@ export async function initializeMcpSession(): Promise<string> {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                Accept: 'application/json',
+                'Accept': 'application/json, text/event-stream',
             },
         });
 
@@ -103,6 +109,9 @@ export async function initializeMcpSession(): Promise<string> {
                 'No session ID returned from initialization'
             );
         }
+
+        // Store the session ID for future use
+        localStorage.setItem('mcp-session-id', result.session_id);
 
         return result.session_id;
     } catch (error) {
@@ -131,11 +140,16 @@ export async function sendMcpRequest<T = any>(
             id: requestId,
         };
 
+        // exists
+        console.log('mcp-session-id', localStorage.getItem('mcp-session-id'));
+
         const response = await fetch('/api/mcp', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 Accept: 'application/json, text/event-stream',
+                // Use the stored session ID
+                'mcp-session-id': localStorage.getItem('mcp-session-id') || '',
             },
             body: JSON.stringify(requestData),
         });

@@ -27,9 +27,16 @@ export default function ImprovedChatUI() {
     useEffect(() => {
         const initializeSession = async () => {
             try {
-                // First check if session already exists
-                console.log('Checking for existing MCP session...');
-                const hasValidSession = await checkMcpSession();
+                // Don't even try to check for a session if we don't have a session ID in localStorage
+                const sessionId = localStorage.getItem('mcp-session-id');
+                let hasValidSession = false;
+
+                if (sessionId) {
+                    console.log(
+                        'Found session ID in localStorage, checking validity...'
+                    );
+                    hasValidSession = await checkMcpSession();
+                }
 
                 if (hasValidSession) {
                     console.log('Found existing valid session');

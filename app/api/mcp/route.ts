@@ -37,6 +37,8 @@ export async function POST(request: NextRequest) {
         // Parse the request body
         const requestBody = await request.json();
 
+        console.log('Request body:', requestBody);
+
         let transport;
 
         if (sessionId && mcpTransport.getTransport(sessionId)) {

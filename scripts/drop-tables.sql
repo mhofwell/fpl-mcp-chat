@@ -3,6 +3,11 @@
 CREATE OR REPLACE FUNCTION public.reset_database()
 RETURNS VOID AS $$
 BEGIN
+    -- Drop storage policies first
+    DROP POLICY IF EXISTS "Users can view all avatars" ON storage.objects;
+    DROP POLICY IF EXISTS "Users can upload their own avatars" ON storage.objects;
+    DROP POLICY IF EXISTS "Users can update their own avatars" ON storage.objects;
+
     -- Drop the triggers to avoid errors on table drops
     DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles;
     DROP TRIGGER IF EXISTS update_user_preferences_updated_at ON user_preferences;

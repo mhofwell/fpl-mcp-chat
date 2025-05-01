@@ -20,8 +20,9 @@ export async function initStandaloneMcpClient(
     // Use environment variable for the server URL
     const defaultBaseUrl =
         typeof window !== 'undefined'
-            ? process.env.EXPRESS_MCP_SERVER_PRIVATE || 'http://localhost:3001'
-            : 'http://localhost:3001';
+            ? process.env.NEXT_PUBLIC_EXPRESS_MCP_SERVER_PUBLIC ||
+              'http://localhost:3001'
+            : process.env.EXPRESS_MCP_SERVER_PRIVATE || 'http://localhost:3001';
 
     const { forceNew = false, baseUrl = `${defaultBaseUrl}/mcp` } = options;
 

@@ -197,6 +197,10 @@ VALUES ('avatars', 'avatars', true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Set up storage policies for avatars
+DROP POLICY IF EXISTS "Users can view all avatars" ON storage.objects;
+DROP POLICY IF EXISTS "Users can upload their own avatars" ON storage.objects;
+DROP POLICY IF EXISTS "Users can update their own avatars" ON storage.objects;
+
 CREATE POLICY "Users can view all avatars"
 ON storage.objects FOR SELECT
 USING (bucket_id = 'avatars');

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { processUserMessage } from '@/app/actions/chat';
 
 interface Message {
     role: 'user' | 'assistant';
@@ -12,9 +13,37 @@ export default function ChatUI() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
-    const [isConnecting, setIsConnecting] = useState(true);
-    const [connectionError, setConnectionError] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!input.trim() || isProcessing) return;
+        
+        // Add user message
+        const userMessage: Message = { role: 'user', content: input };
+        setMessages(prev => [...prev, userMessage]);
+        setInput('');
+        setIsProcessing(true);
+        
+        try {
+            // Call server action
+            const response = await processUserMessage(userMessage.content);
+            
+            // Add assistant response
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: response.answer
+            }]);
+        } catch (error) {
+            console.error('Error processing message:', error);
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: 'Sorry, there was an error processing your request.'
+            }]);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
 
     return (
         <div className="flex flex-col h-[600px] w-full max-w-3xl mx-auto rounded-lg border bg-background shadow-sm">
@@ -74,7 +103,7 @@ export default function ChatUI() {
 
             {/* Input area */}
             <div className="p-3 border-t">
-                <form className="flex gap-2">
+                <form className="flex gap-2" onSubmit={handleSubmit}>
                     <input
                         type="text"
                         value={input}

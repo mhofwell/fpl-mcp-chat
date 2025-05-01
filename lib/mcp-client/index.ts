@@ -1,4 +1,4 @@
-// fpl-nextjs-app/lib/mcp-client/standalone-client.ts
+// fpl-nextjs-app/lib/mcp-client/index.ts
 'use client';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';

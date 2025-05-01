@@ -1,178 +1,130 @@
-// lib/mcp-client/index.ts
+// fpl-nextjs-app/lib/mcp-client/standalone-client.ts
 'use client';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-// Client singleton
-let client: Client | null = null;
-let transport: StreamableHTTPClientTransport | null = null;
-
-/**
- * Check if the MCP client is initialized
- */
-export function isMcpClientInitialized(): boolean {
-    return client !== null && transport !== null;
-}
+// Keep track of client and transport
+let mcpClient: Client | null = null;
+let mcpTransport: StreamableHTTPClientTransport | null = null;
 
 /**
- * Initialize the MCP client
+ * Initialize MCP client to connect to standalone server
  */
-export async function initMcpClient(forceNew = false): Promise<Client> {
+export async function initStandaloneMcpClient(
+    options: {
+        forceNew?: boolean;
+        baseUrl?: string;
+    } = {}
+): Promise<Client> {
+    // Use environment variable for the server URL
+    const defaultBaseUrl =
+        typeof window !== 'undefined'
+            ? process.env.NEXT_PUBLIC_MCP_SERVER_URL || 'http://localhost:3001'
+            : 'http://localhost:3001';
+
+    const { forceNew = false, baseUrl = `${defaultBaseUrl}/mcp` } = options;
+
     // Return existing client if available and not forcing new
-    if (client && transport && !forceNew) {
-        return client;
+    if (mcpClient && mcpTransport && !forceNew) {
+        return mcpClient;
     }
 
     // Close existing client if forcing new
-    if (forceNew && client && transport) {
-        await closeMcpClient();
+    if (forceNew && mcpClient && mcpTransport) {
+        await closeStandaloneMcpClient();
     }
 
     // Create new client
-    client = new Client({
-        name: 'FPL Chat Client',
+    mcpClient = new Client({
+        name: 'NextJS-Standalone-MCP-Client',
         version: '1.0.0',
     });
 
     // Get existing session ID from localStorage
     const sessionId =
         typeof window !== 'undefined'
-            ? localStorage.getItem('mcp-session-id')
+            ? localStorage.getItem('standalone-mcp-session-id')
             : null;
 
     // Create new transport
-    transport = new StreamableHTTPClientTransport(
-        new URL('/api/mcp', window.location.origin),
-        {
-            sessionId: sessionId || undefined,
-            reconnectionOptions: {
-                maxReconnectionDelay: 10000,
-                initialReconnectionDelay: 1000,
-                reconnectionDelayGrowFactor: 1.5,
-                maxRetries: 3,
-            },
-        }
-    );
+    mcpTransport = new StreamableHTTPClientTransport(new URL(baseUrl), {
+        sessionId: sessionId || undefined,
+        reconnectionOptions: {
+            maxReconnectionDelay: 30000,
+            initialReconnectionDelay: 1000,
+            reconnectionDelayGrowFactor: 1.5,
+            maxRetries: 5,
+        },
+    });
 
     // Set up error handler
-    transport.onerror = (error) => {
-        console.error('MCP transport error:', error);
+    mcpTransport.onerror = (error) => {
+        console.error('Standalone MCP transport error:', error);
     };
 
     // Connect client to transport
     try {
-        await client.connect(transport);
-        console.log('MCP client connected successfully');
+        await mcpClient.connect(mcpTransport);
+        console.log('Connected to standalone MCP server successfully');
 
         // Store session ID
-        if (transport.sessionId && typeof window !== 'undefined') {
-            localStorage.setItem('mcp-session-id', transport.sessionId);
+        if (mcpTransport.sessionId && typeof window !== 'undefined') {
+            localStorage.setItem(
+                'standalone-mcp-session-id',
+                mcpTransport.sessionId
+            );
         }
 
-        return client;
+        return mcpClient;
     } catch (error) {
-        console.error('Error connecting MCP client:', error);
-        client = null;
-        transport = null;
+        console.error('Error connecting to standalone MCP server:', error);
+        mcpClient = null;
+        mcpTransport = null;
         throw error;
     }
 }
 
 /**
- * Close the MCP client and clean up
+ * Close the standalone MCP client
  */
-export async function closeMcpClient(): Promise<void> {
-    if (transport) {
-        await transport.close();
-        transport = null;
+export async function closeStandaloneMcpClient(): Promise<void> {
+    if (mcpTransport) {
+        await mcpTransport.close();
+        mcpTransport = null;
     }
-
-    client = null;
+    mcpClient = null;
 
     if (typeof window !== 'undefined') {
-        localStorage.removeItem('mcp-session-id');
+        localStorage.removeItem('standalone-mcp-session-id');
     }
 }
 
 /**
- * Call an MCP tool
+ * Call an echo tool on the standalone MCP server for testing
  */
-export async function callMcpTool(
-    toolName: string,
-    args: any = {}
-): Promise<any> {
-    if (!isMcpClientInitialized()) {
-        await initMcpClient();
-    }
-
-    if (!client) {
-        throw new Error('MCP client not initialized');
+export async function testStandaloneMcpEcho(message: string): Promise<string> {
+    if (!mcpClient) {
+        await initStandaloneMcpClient();
     }
 
     try {
-        const result = await client.callTool({
-            name: toolName,
-            arguments: args,
+        const result = await mcpClient!.callTool({
+            name: 'echo',
+            arguments: { message },
         });
 
-        return result;
-    } catch (error) {
-        console.error(`Error calling MCP tool "${toolName}":`, error);
-
-        // Check if error is related to session
-        const errorMessage =
-            error instanceof Error ? error.message : String(error);
-
         if (
-            errorMessage.includes('session') ||
-            errorMessage.includes('unauthorized') ||
-            errorMessage.includes('401')
+            result &&
+            Array.isArray(result.content) &&
+            result.content.length > 0
         ) {
-            // Try to reinitialize with a new session
-            await closeMcpClient();
-            await initMcpClient(true);
-
-            // Retry the tool call once
-            return client!.callTool({
-                name: toolName,
-                arguments: args,
-            });
+            return result.content[0].text;
         }
 
+        return 'No response from server';
+    } catch (error) {
+        console.error('Error calling echo tool:', error);
         throw error;
     }
-}
-
-/**
- * Get FPL answer using the answer-fpl-question tool
- */
-export async function getFplAnswer(
-    question: string,
-    debugMode = false
-): Promise<string> {
-    const result = await callMcpTool('answer-fpl-question', {
-        question,
-        debug_mode: debugMode,
-    });
-
-    // Extract text content from the result
-    if (result && Array.isArray(result.content) && result.content.length > 0) {
-        return result.content[0].text;
-    }
-
-    return "Sorry, I couldn't find an answer to your question.";
-}
-
-// Other utility functions
-export async function getTeamInfo(teamName: string): Promise<any> {
-    return callMcpTool('get-team-info', { team_name: teamName });
-}
-
-export async function getPlayerInfo(playerName: string): Promise<any> {
-    return callMcpTool('get-player-info', { player_name: playerName });
-}
-
-export async function getGameweekInfo(gameweekId?: number): Promise<any> {
-    return callMcpTool('get-gameweek-info', { gameweek_id: gameweekId });
 }

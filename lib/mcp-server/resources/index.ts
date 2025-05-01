@@ -2,7 +2,7 @@ import {
     McpServer,
     ResourceTemplate,
 } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { createClient } from '../../../utils/supabase/client';
+import { createClient } from '../../../../../utils/supabase/client';
 import redis from '@/lib/redis/redis-client';
 
 export function registerFplResources(server: McpServer) {

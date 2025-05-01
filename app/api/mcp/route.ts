@@ -1,217 +1,483 @@
 // app/api/mcp/route.ts
-import { NextRequest } from 'next/server';
+import { createMcpServer } from '@/lib/mcp-server/index';
+import { mcpTransport } from '@/lib/mcp-server/transport';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { cookies } from 'next/headers';
 import { randomUUID } from 'crypto';
-import { getMcpServer, storeSession, updateSessionActivity, getSession, deleteSession } from '@/lib/mcp-server';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { NextRequest, NextResponse } from 'next/server';
+import { checkForUpdates } from '@/lib/fpl-api/fpl-data-sync';
+import { fplApiService } from '@/lib/fpl-api/service';
+import redis from '@/lib/redis/redis-client';
 
-// Map to store transports by session ID
-const transports: Record<string, StreamableHTTPServerTransport> = {};
+// Get environment
+const appEnv = process.env.APP_ENV || 'development';
+const isDevMode = appEnv === 'development';
 
-// Handle GET requests for SSE
-export async function GET(request: NextRequest) {
-  const sessionId = request.headers.get('mcp-session-id');
-  
-  if (!sessionId || !transports[sessionId]) {
-    return new Response('Invalid or missing session ID', { status: 400 });
-  }
-  
-  // Update session activity
-  await updateSessionActivity(sessionId);
-  
-  const transport = transports[sessionId];
-  
-  // Create a ReadableStream for SSE
-  const stream = new ReadableStream({
-    start(controller) {
-      // Store the controller for later use by the transport
-      (transport as any).controller = controller;
-      
-      // Set up close handler
-      transport.onclose = () => {
-        controller.close();
-        // Clean up on connection close
-        if (transport.sessionId) {
-          delete transports[transport.sessionId];
-        }
-      };
+// Global variable to track if FPL service has been initialized
+let fplServiceInitialized = false;
+
+// Initialize FPL service (runs once on server startup)
+async function initializeFplService() {
+    if (!fplServiceInitialized) {
+        await fplApiService.initialize();
+        await checkForUpdates();
+        fplServiceInitialized = true;
+        console.log('FPL service initialized and updates checked');
     }
-  });
-  
-  // Return a streaming response
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
-    }
-  });
 }
 
-// Handle POST requests for client-to-server communication
-export async function POST(request: NextRequest) {
-  const sessionId = request.headers.get('mcp-session-id');
-  const body = await request.json();
-  
-  let transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => "default-temp-id"
-  });
-  let server;
-  
-  // If we have a valid session ID, use its transport
-  if (sessionId && transports[sessionId]) {
-    transport = transports[sessionId];
-    
-    // Update session activity
-    await updateSessionActivity(sessionId);
-  } 
-  // If this is an initialization request, create a new session
-  else if (!sessionId && body.method === 'initialize') {
-    const newSessionId = randomUUID();
-    
-    transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => newSessionId,
-      onsessioninitialized: async (sessionId) => {
-        transports[sessionId] = transport;
-        
-        // Store session in Redis
-        await storeSession(sessionId);
-      }
-    });
-    
-    // Clean up when the connection is closed
-    transport.onclose = () => {
-      if (transport.sessionId) {
-        delete transports[transport.sessionId];
-      }
-    };
-    
-    // Get our MCP server and connect it to this transport
-    server = getMcpServer();
+async function recreateTransportFromRedis(sessionId: string) {
+    console.log(`Attempting to recreate transport for session ${sessionId}`);
+
+    // Check if session exists in Redis
+    const exists = await redis.exists(`mcp:session:${sessionId}`);
+    if (!exists) {
+        console.log(`Session ${sessionId} not found in Redis`);
+        return undefined;
+    }
+
+    // Create a new transport with the existing session ID
+    console.log(`Recreating transport for existing session ${sessionId}`);
+    const transport = await mcpTransport.createTransport(sessionId);
+
+    // Create and connect a new server instance
+    const server = await createMcpServer();
     await server.connect(transport);
-  } 
-  else {
-    // Check if incoming requests have valid session IDs from Redis
-    if (sessionId) {
-      // Check if we have transport, if not but session exists in Redis, create one
-      if (!transports[sessionId]) {
-        const sessionData = await getSession(sessionId);
-        if (sessionData) {
-          transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => sessionId,
-            onsessioninitialized: async (sid) => {
-              transports[sid] = transport;
-            }
-          });
-          
-          // Connect to MCP server
-          server = getMcpServer();
-          await server.connect(transport);
-        }
-      } else {
-        transport = transports[sessionId];
-      }
-    }
-  }
-  
-  if (!transport) {
-    return Response.json(
-      {
-        jsonrpc: '2.0',
-        error: {
-          code: -32000,
-          message: 'Bad Request: No valid session ID provided',
-        },
-        id: body.id || null,
-      },
-      { status: 400 }
+    console.log(
+        `Reconnected server to recreated transport for session ${sessionId}`
     );
-  }
-  
-  // Get our MCP server if it wasn't already created
-  if (!server) {
-    server = getMcpServer();
-  }
-  
-  // Create a response transformer
-  const transformStream = new TransformStream();
-  const writer = transformStream.writable.getWriter();
-  
-  // Store headers and status for the response
-  const responseData = {
-    headers: {} as Record<string, string>,
-    status: 200
-  };
-  
-  try {
-    // Handle the request with our transport
-    await transport.handleRequest(
-      { 
-        method: 'POST', 
-        headers: Object.fromEntries(request.headers.entries()),
-        body: body
-      } as any,
-      {
-        writeHead: (status: number, headers?: Record<string, string>) => {
-          responseData.status = status;
-          responseData.headers = headers || {};
-        },
-        write: (data: string) => {
-          writer.write(new TextEncoder().encode(data));
-        },
-        end: () => {
-          writer.close();
-        }
-      } as any,
-      body
-    );
-    
-    // Return the response with the appropriate headers
-    return new Response(transformStream.readable, {
-      status: responseData.status,
-      headers: {
-        ...responseData.headers,
-        'mcp-session-id': transport.sessionId || ''
-      }
-    });
-  } catch (error) {
-    console.error('Error handling MCP request:', error);
-    writer.close();
-    
-    return Response.json(
-      {
-        jsonrpc: '2.0',
-        error: {
-          code: -32603,
-          message: 'Internal server error',
-        },
-        id: null,
-      },
-      { status: 500 }
-    );
-  }
+
+    return transport;
 }
 
-// Handle DELETE requests for session termination
+export async function POST(request: NextRequest) {
+    try {
+        console.log('==== MCP POST REQUEST START ====');
+        // Get session ID from cookie or header
+        const cookieStore = await cookies();
+        const sessionId =
+            request.headers.get('mcp-session-id') ||
+            cookieStore.get('mcp-session-id')?.value ||
+            null;
+
+        console.log(
+            'Request headers:',
+            Object.fromEntries(request.headers.entries())
+        );
+        console.log('Session ID from request:', sessionId);
+        console.log(
+            'Active sessions before processing:',
+            await mcpTransport.getActiveSessions()
+        );
+
+        // Parse the request body
+        let requestBody;
+        try {
+            requestBody = await request.json();
+        } catch (error) {
+            console.error('Error parsing request body:', error);
+            return NextResponse.json(
+                {
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32700,
+                        message: 'Parse error: Invalid JSON',
+                    },
+                    id: requestBody?.id || 'error-' + Date.now(),
+                },
+                { status: 400 }
+            );
+        }
+
+        console.log('Request body:', JSON.stringify(requestBody));
+
+        // For non-initialization requests, we check if the session exists
+        if (sessionId) {
+            // Try to get existing transport
+            let transport = await mcpTransport.getTransport(sessionId);
+
+            if (!transport) {
+                console.log(
+                    `Transport not in memory, attempting to recreate from Redis: ${sessionId}`
+                );
+                transport = await recreateTransportFromRedis(sessionId);
+            }
+
+            if (transport) {
+                console.log(
+                    'Found or recreated transport for session:',
+                    sessionId
+                );
+
+                // Create a response stream
+                const { readable, writable } = new TransformStream();
+                const writer = writable.getWriter();
+
+                // Mock response object to handle streaming
+                const mockResponse = {
+                    writeHead: () => mockResponse,
+                    setHeader: () => mockResponse,
+                    getHeader: (name: string) => request.headers.get(name),
+                    write: async (chunk: string) => {
+                        await writer.write(new TextEncoder().encode(chunk));
+                        return mockResponse;
+                    },
+                    end: async (chunk?: string) => {
+                        if (chunk) {
+                            await writer.write(new TextEncoder().encode(chunk));
+                        }
+                        await writer.close();
+                        return mockResponse;
+                    },
+                    // Add necessary properties for the transport handler
+                    statusCode: 200,
+                    statusMessage: 'OK',
+                    headersSent: false,
+                };
+
+                // Handle the request with the transport
+                await transport.handleRequest(
+                    request as any,
+                    mockResponse as any,
+                    requestBody
+                );
+
+                console.log('==== MCP POST REQUEST END ====');
+                return new NextResponse(readable, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'mcp-session-id': sessionId,
+                    },
+                });
+            } else {
+                console.log('Session not found:', sessionId);
+                console.log(
+                    'Active sessions:',
+                    await mcpTransport.getActiveSessions()
+                );
+
+                return NextResponse.json(
+                    {
+                        jsonrpc: '2.0',
+                        id: 'error-' + Date.now(),
+                        error: {
+                            code: -32000,
+                            message: 'No session ID found',
+                        },
+                    },
+                    {
+                        status: 404,
+                        headers: { 'Content-Type': 'application/json' },
+                    }
+                );
+            }
+        }
+        // Handle initialize requests
+        else if (isInitializeRequest(requestBody)) {
+            // Create a new session ID
+            const newSessionId = randomUUID();
+            console.log(
+                'Creating new transport with session ID:',
+                newSessionId
+            );
+
+            // Create a new transport
+            const transport = await mcpTransport.createTransport(newSessionId);
+
+            // Create and connect server
+            const server = await createMcpServer();
+            await server.connect(transport);
+
+            console.log('Transport connected to server');
+
+            // Create a response stream
+            const { readable, writable } = new TransformStream();
+            const writer = writable.getWriter();
+
+            // Mock response object
+            const mockResponse = {
+                writeHead: () => mockResponse,
+                setHeader: () => mockResponse,
+                getHeader: (name: string) => request.headers.get(name),
+                write: async (chunk: string) => {
+                    await writer.write(new TextEncoder().encode(chunk));
+                    return mockResponse;
+                },
+                end: async (chunk?: string) => {
+                    if (chunk) {
+                        await writer.write(new TextEncoder().encode(chunk));
+                    }
+                    await writer.close();
+                    return mockResponse;
+                },
+                // Add necessary properties
+                statusCode: 200,
+                statusMessage: 'OK',
+                headersSent: false,
+            };
+
+            // Handle the request with the transport
+            await transport.handleRequest(
+                request as any,
+                mockResponse as any,
+                requestBody
+            );
+
+            console.log(
+                'Active sessions after initialization:',
+                await mcpTransport.getActiveSessions()
+            );
+            console.log('==== MCP POST REQUEST END ====');
+
+            return new NextResponse(readable, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'mcp-session-id': newSessionId,
+                },
+            });
+        } else {
+            // No session ID provided for a non-initialization request
+            console.log(
+                'No session ID provided for non-initialization request'
+            );
+            return NextResponse.json(
+                {
+                    jsonrpc: '2.0',
+                    id: 'error-' + Date.now(),
+                    error: {
+                        code: -32000,
+                        message: 'No session ID found',
+                    },
+                },
+                {
+                    status: 400,
+                    headers: { 'Content-Type': 'application/json' },
+                }
+            );
+        }
+    } catch (error) {
+        console.error('Error handling MCP POST request:', error);
+        return NextResponse.json(
+            {
+                jsonrpc: '2.0',
+                id: 'error-' + Date.now(),
+                error: {
+                    code: -32603,
+                    message: 'Internal server error',
+                    data:
+                        process.env.NODE_ENV === 'development'
+                            ? String(error)
+                            : undefined,
+                },
+            },
+            {
+                status: 500,
+                headers: { 'Content-Type': 'application/json' },
+            }
+        );
+    }
+}
+
+export async function GET(request: NextRequest) {
+    try {
+        // Ensure FPL service is initialized
+        await initializeFplService();
+
+        // Get session ID from query param, cookie, or header
+        const url = new URL(request.url);
+        const sessionIdFromQuery = url.searchParams.get('mcp-session-id');
+
+        const cookieStore = await cookies();
+        const sessionId =
+            sessionIdFromQuery ||
+            request.headers.get('mcp-session-id') ||
+            cookieStore.get('mcp-session-id')?.value ||
+            null;
+
+        if (!sessionId) {
+            return NextResponse.json(
+                {
+                    jsonrpc: '2.0',
+                    id: 'error-' + Date.now(),
+                    error: {
+                        code: -32000,
+                        message: 'No session ID found',
+                    },
+                },
+                { status: 400 }
+            );
+        }
+
+        const transport = await mcpTransport.getTransport(sessionId);
+        if (!transport) {
+            return NextResponse.json(
+                {
+                    jsonrpc: '2.0',
+                    id: 'error-' + Date.now(),
+                    error: {
+                        code: -32001,
+                        message: 'Invalid session ID',
+                    },
+                },
+                { status: 400 }
+            );
+        }
+
+        if (isDevMode) {
+            console.log(`[DEV] MCP GET request (SSE) for session:`, sessionId);
+        }
+
+        // Create a server-sent events stream
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+
+        // Write SSE headers and keep-alive
+        const encoder = new TextEncoder();
+
+        // Initial comment to establish connection
+        await writer.write(encoder.encode(': connection established\n\n'));
+
+        // Create ping interval to keep connection alive
+        const pingInterval = setInterval(async () => {
+            try {
+                await writer.write(encoder.encode(': ping\n\n'));
+            } catch (e) {
+                clearInterval(pingInterval);
+            }
+        }, 30000);
+
+        // Set up transport to use this writer
+        transport.onmessage = async (message) => {
+            try {
+                // Log the message before sending
+                console.log(
+                    'SSE message before sending:',
+                    JSON.stringify(message)
+                );
+
+                // Ensure the message follows JSON-RPC format
+                if (message && typeof message === 'object') {
+                    // Make sure jsonrpc field is present
+                    if (!message.jsonrpc) {
+                        message.jsonrpc = '2.0';
+                    }
+
+                    // Ensure ID is not null (must be string or number)
+                    if (message.id === null) {
+                        message.id = 'sse-' + Date.now();
+                    }
+
+                    // Check for structure validity
+                    if (message.error && !message.id) {
+                        message.id = 'error-' + Date.now();
+                    }
+
+                    // Check for proper result structure
+                    if (!message.error && !message.result && !message.method) {
+                        // Add a result field if missing
+                        message.result = message.result || {};
+                    }
+                }
+
+                const data = JSON.stringify(message);
+                console.log('SSE message after formatting:', data);
+                await writer.write(encoder.encode(`data: ${data}\n\n`));
+            } catch (error) {
+                console.error('Error writing SSE message:', error);
+                clearInterval(pingInterval);
+            }
+        };
+
+        // Return SSE response
+        return new NextResponse(readable, {
+            headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                Connection: 'keep-alive',
+            },
+        });
+    } catch (error) {
+        console.error('Error handling MCP GET request:', error);
+        return NextResponse.json(
+            {
+                jsonrpc: '2.0',
+                id: 'error-' + Date.now(),
+                error: {
+                    code: -32603,
+                    message: 'Internal server error',
+                },
+            },
+            { status: 500 }
+        );
+    }
+}
+
 export async function DELETE(request: NextRequest) {
-  const sessionId = request.headers.get('mcp-session-id');
-  
-  if (!sessionId) {
-    return new Response('Missing session ID', { status: 400 });
-  }
-  
-  // Check if we have a transport for this session
-  if (transports[sessionId]) {
-    const transport = transports[sessionId];
-    await transport.close();
-    delete transports[sessionId];
-  }
-  
-  // Also clean up session from Redis
-  try {
-    await deleteSession(sessionId);
-  } catch (error) {
-    console.error('Error deleting session:', error);
-  }
-  
-  return new Response(null, { status: 204 });
+    try {
+        // Get session ID from cookie or header
+        const cookieStore = await cookies();
+        const sessionId =
+            request.headers.get('mcp-session-id') ||
+            cookieStore.get('mcp-session-id')?.value ||
+            null;
+
+        if (!sessionId) {
+            return NextResponse.json(
+                {
+                    jsonrpc: '2.0',
+                    id: 'error-' + Date.now(),
+                    error: {
+                        code: -32000,
+                        message: 'No session ID found',
+                    },
+                },
+                { status: 400 }
+            );
+        }
+
+        const transport = await mcpTransport.getTransport(sessionId);
+        if (!transport) {
+            return NextResponse.json(
+                {
+                    jsonrpc: '2.0',
+                    id: 'error-' + Date.now(),
+                    error: {
+                        code: -32001,
+                        message: 'Invalid session ID',
+                    },
+                },
+                { status: 400 }
+            );
+        }
+
+        if (isDevMode) {
+            console.log(`[DEV] Deleting MCP session:`, sessionId);
+        }
+
+        // Disconnect and cleanup
+        (transport as any).disconnect();
+
+        // Clear cookie in response
+        const response = NextResponse.json({
+            jsonrpc: '2.0',
+            result: { success: true },
+            id: 'delete-' + Date.now(), // Always provide a valid ID
+        });
+        response.cookies.delete('mcp-session-id');
+
+        return response;
+    } catch (error) {
+        console.error('Error handling MCP DELETE request:', error);
+        return NextResponse.json(
+            {
+                jsonrpc: '2.0',
+                id: 'error-' + Date.now(),
+                error: {
+                    code: -32603,
+                    message: 'Internal server error',
+                },
+            },
+            { status: 500 }
+        );
+    }
 }

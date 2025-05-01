@@ -2,86 +2,58 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import {
-    checkMcpSession,
-    initializeMcpSession,
-    getFplAnswer,
-} from '@/lib/mcp-client';
-
-import { initMcpClient, callMcpTool } from '@/lib/mcp-client';
+import { initMcpClient, getFplAnswer } from '@/lib/mcp-client';
 
 interface Message {
     role: 'user' | 'assistant';
     content: string;
 }
 
-export default function ImprovedChatUI() {
+export default function ChatUI() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
-    const [isInitializing, setIsInitializing] = useState(true);
-    const [sessionInitialized, setSessionInitialized] = useState(false);
-    const [initError, setInitError] = useState('');
+    const [isConnecting, setIsConnecting] = useState(true);
+    const [connectionError, setConnectionError] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    // Check session and auto-init on mount
+    // Initialize MCP client on component mount
     useEffect(() => {
-        const initializeSession = async () => {
+        async function setupMcpClient() {
             try {
-                setIsInitializing(true);
-                setInitError('');
+                setIsConnecting(true);
+                setConnectionError(null);
 
-                // When first loading, always make a clean session
-                console.log('Component mounted, forcing fresh session...');
-                localStorage.removeItem('mcp-session-id');
+                // Initialize client with a fresh session
+                await initMcpClient(true);
 
-                // Initialize a new session
-                const sessionId = await initializeMcpSession();
-                console.log(
-                    'Session initialized successfully with ID:',
-                    sessionId
-                );
-                setSessionInitialized(true);
+                // Successful connection
+                setIsConnecting(false);
             } catch (error) {
-                console.error('Error during session initialization:', error);
-                const errorMessage =
-                    error instanceof Error ? error.message : 'Unknown error';
-                setInitError(
-                    `Failed to initialize chat session: ${errorMessage}`
+                console.error('Failed to initialize MCP client:', error);
+                setConnectionError(
+                    error instanceof Error
+                        ? error.message
+                        : 'Unknown connection error'
                 );
-            } finally {
-                setIsInitializing(false);
+                setIsConnecting(false);
             }
-        };
+        }
 
-        initializeSession();
+        setupMcpClient();
+
+        // Clean up on unmount
+        return () => {
+            // No need for explicit cleanup as the MCP client is a singleton
+        };
     }, []);
 
-    // Initialize MCP session (manual fallback)
-    const handleInitSession = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsInitializing(true);
-        setInitError('');
-
-        try {
-            await initializeMcpSession();
-            setSessionInitialized(true);
-        } catch (error) {
-            console.error('Error initializing session:', error);
-            const errorMessage =
-                error instanceof Error ? error.message : 'Unknown error';
-            setInitError(`Failed to initialize chat session: ${errorMessage}`);
-        } finally {
-            setIsInitializing(false);
-        }
-    };
-
-    // Scroll to bottom of messages
+    // Scroll to bottom of messages on new message
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    // Handle user message submission
+    // Handle message submission
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -91,7 +63,7 @@ export default function ImprovedChatUI() {
         setInput('');
         setIsProcessing(true);
 
-        // Add user message to UI
+        // Add user message
         const userMessageObj: Message = {
             role: 'user',
             content: userMessage,
@@ -99,82 +71,100 @@ export default function ImprovedChatUI() {
         setMessages((prev) => [...prev, userMessageObj]);
 
         try {
-            // Get response from the FPL assistant
-            const content = await getFplAnswer(userMessage);
+            // Get response from MCP server
+            const response = await getFplAnswer(userMessage);
 
-            // Add assistant response to UI
+            // Add assistant message
             const assistantMessageObj: Message = {
                 role: 'assistant',
-                content,
+                content: response,
             };
             setMessages((prev) => [...prev, assistantMessageObj]);
         } catch (error) {
             console.error('Error getting response:', error);
 
-            // Check if this is a session error
+            // Add error message
             const errorMessage =
-                error instanceof Error ? error.message : String(error);
+                error instanceof Error
+                    ? error.message
+                    : 'Unknown error occurred. Please try again.';
 
-            if (
-                errorMessage.includes('session') ||
-                errorMessage.includes('restart')
-            ) {
-                setSessionInitialized(false);
-                setInitError(
-                    'Your session has expired. Please restart the chat.'
-                );
-                return;
-            }
-
-            // Add error message to UI
             const errorMessageObj: Message = {
                 role: 'assistant',
-                content:
-                    'Sorry, there was an error processing your request. Please try again.',
+                content: `Sorry, there was an error: ${errorMessage}`,
             };
             setMessages((prev) => [...prev, errorMessageObj]);
+
+            // If it was a connection error, show reconnect button
+            if (
+                errorMessage.includes('session') ||
+                errorMessage.includes('connection')
+            ) {
+                setConnectionError(
+                    'Connection lost. Please reload the page to reconnect.'
+                );
+            }
         } finally {
             setIsProcessing(false);
         }
     };
 
-    // Show session initialization UI if session is not initialized
-    if (!sessionInitialized) {
+    // Handle retry connection
+    const handleRetryConnection = async () => {
+        setIsConnecting(true);
+        setConnectionError(null);
+
+        try {
+            await initMcpClient(true);
+            setIsConnecting(false);
+        } catch (error) {
+            console.error('Failed to reconnect:', error);
+            setConnectionError(
+                error instanceof Error ? error.message : 'Failed to reconnect'
+            );
+            setIsConnecting(false);
+        }
+    };
+
+    // Show loading state
+    if (isConnecting) {
         return (
             <div className="flex flex-col h-[600px] w-full max-w-3xl mx-auto rounded-lg border bg-background shadow-sm">
-                <div className="border-b p-3">
-                    <h3 className="font-semibold">FPL Chat Assistant</h3>
-                    <p className="text-sm text-muted-foreground">
-                        Initialize a chat session to begin
-                    </p>
+                <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                        <h3 className="text-lg font-medium mb-2">
+                            Connecting to FPL Chat Assistant...
+                        </h3>
+                        <p className="text-muted-foreground">
+                            Please wait while we establish a connection.
+                        </p>
+                    </div>
                 </div>
+            </div>
+        );
+    }
 
-                <div className="flex-1 p-4 flex flex-col items-center justify-center">
-                    <h2 className="text-xl font-semibold mb-4">
-                        Start a New Chat Session
-                    </h2>
-                    <p className="text-muted-foreground mb-8 text-center max-w-md">
-                        Click the button below to start a new chat session with
-                        the FPL Assistant
-                    </p>
-
-                    {initError && (
-                        <div className="p-3 mb-4 text-red-500 bg-red-50 rounded-md border border-red-200">
-                            {initError}
-                        </div>
-                    )}
-
-                    <form onSubmit={handleInitSession}>
+    // Show error state
+    if (connectionError) {
+        return (
+            <div className="flex flex-col h-[600px] w-full max-w-3xl mx-auto rounded-lg border bg-background shadow-sm">
+                <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                        <h3 className="text-lg font-medium mb-2 text-red-500">
+                            Connection Error
+                        </h3>
+                        <p className="text-muted-foreground mb-4">
+                            {connectionError}
+                        </p>
                         <Button
-                            type="submit"
-                            disabled={isInitializing}
-                            className="px-6 py-2"
+                            onClick={handleRetryConnection}
+                            disabled={isConnecting}
                         >
-                            {isInitializing
-                                ? 'Initializing...'
-                                : 'Start Chat Session'}
+                            {isConnecting
+                                ? 'Reconnecting...'
+                                : 'Retry Connection'}
                         </Button>
-                    </form>
+                    </div>
                 </div>
             </div>
         );
@@ -250,7 +240,6 @@ export default function ImprovedChatUI() {
                     <Button
                         type="submit"
                         disabled={!input.trim() || isProcessing}
-                        className="shrink-0"
                     >
                         {isProcessing ? 'Thinking...' : 'Send'}
                     </Button>

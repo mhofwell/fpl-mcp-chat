@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { createClient } from '../../../utils/supabase/client';
-import redis from '../../../lib/redis/redis-client';
+import { createClient } from '../../../../../utils/supabase/client';
+import redis from '../../../../redis/redis-client';
 
 export function registerFplTools(server: McpServer) {
     // Tool for getting player stats

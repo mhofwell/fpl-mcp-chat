@@ -2,12 +2,11 @@
 import {
     initMcpClient,
     isMcpClientInitialized,
-    closeMcpClient,
     terminateMcpSession,
 } from './transport';
-import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { z } from 'zod';
+
 /**
  * Client utilities for interacting with MCP server
  */
@@ -49,6 +48,32 @@ export class McpClientError extends Error {
 }
 
 /**
+ * Error indicating MCP session has expired or is invalid
+ */
+export class McpSessionError extends McpClientError {
+    constructor(
+        message: string = 'Session expired or invalid',
+        requestId: string | number | null = null
+    ) {
+        super(message, -32000, requestId);
+        this.name = 'McpSessionError';
+    }
+}
+
+/**
+ * Error indicating network or connection issues
+ */
+export class McpConnectionError extends McpClientError {
+    constructor(
+        message: string = 'Connection error',
+        requestId: string | number | null = null
+    ) {
+        super(message, -32001, requestId);
+        this.name = 'McpConnectionError';
+    }
+}
+
+/**
  * Check if the session is currently valid
  */
 export async function checkMcpSession(): Promise<boolean> {
@@ -76,26 +101,75 @@ export async function checkMcpSession(): Promise<boolean> {
  */
 export async function initializeMcpSession(): Promise<string> {
     try {
+        console.log('Initializing new MCP session...');
+
         // Close any existing client first
         await closeMcpClient();
 
         // Remove any existing session ID
-        localStorage.removeItem('mcp-session-id');
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('mcp-session-id');
+        }
 
-        // Initialize a new client (will get a new session ID)
-        const client = await initMcpClient();
+        console.log('Sending initialization request...');
 
-        // Get the session ID from the transport
-        const sessionId = (client.transport as StreamableHTTPClientTransport)
-            .sessionId;
-        if (!sessionId) {
-            throw new McpClientError(
-                'No session ID returned from initialization'
+        // Send explicit initialization request with JSON-RPC format
+        const initResponse = await fetch('/api/mcp/init', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json, text/event-stream',
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: Date.now(),
+                method: 'initialize',
+                params: {},
+            }),
+        });
+
+        if (!initResponse.ok) {
+            throw new Error(
+                `Failed to initialize session: ${initResponse.status} ${initResponse.statusText}`
             );
         }
 
-        return sessionId;
+        // Get session ID from response
+        const sessionId = initResponse.headers.get('mcp-session-id');
+        if (sessionId) {
+            console.log('Session ID from response headers:', sessionId);
+            localStorage.setItem('mcp-session-id', sessionId);
+
+            // Initialize MCP client after getting the session ID
+            await initMcpClient();
+
+            return sessionId;
+        }
+
+        // If no session ID in header, check response body
+        try {
+            const data = await initResponse.json();
+            if (data.result && data.result.sessionId) {
+                console.log(
+                    'Session ID from response body:',
+                    data.result.sessionId
+                );
+                localStorage.setItem('mcp-session-id', data.result.sessionId);
+
+                // Initialize MCP client after getting the session ID
+                await initMcpClient();
+
+                return data.result.sessionId;
+            }
+
+            throw new Error('No session ID returned from initialization');
+        } catch (error) {
+            throw new Error(
+                `Invalid response from initialization endpoint: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
     } catch (error) {
+        console.error('Error initializing session:', error);
         if (error instanceof McpClientError) {
             throw error;
         }
@@ -168,37 +242,53 @@ export async function sendMcpRequest<T = any>(
 }
 
 /**
- * Call an MCP tool using direct API request (bypassing validation)
+ * Call an MCP tool
  */
-export async function callMcpTool<T = any>(
-    options: McpToolCallOptions
-): Promise<T> {
+export async function callMcpTool(toolName: string, args: any = {}) {
     try {
-        // Ensure client is initialized
-        const client = await initMcpClient();
+        // Create a custom request with proper JSON-RPC format
+        const requestId = `call-${Date.now()}-${Math.random().toString(36).substring(2)}`;
 
-        // Use the direct request method to avoid schema validation issues
-        const result = await client.request(
-            {
-                method: 'tools/call',
-                params: {
-                    name: options.name,
-                    arguments: options.arguments,
-                },
+        // Create the request object manually following JSON-RPC format
+        const request = {
+            jsonrpc: '2.0',
+            method: 'callTool', // The method is "callTool" not the tool name
+            params: {
+                // Tool details go in params
+                name: toolName,
+                arguments: args,
             },
-            CallToolResultSchema
+            id: requestId,
+        };
+
+        // Log the formatted request for debugging
+        console.log(
+            'Sending formatted JSON-RPC request:',
+            JSON.stringify(request)
         );
 
-        return result as T;
-    } catch (error) {
-        if (error instanceof McpClientError) {
-            throw error;
+        // Send the request directly to avoid SDK's internal formatting
+        const response = await fetch('/api/mcp', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json, text/event-stream',
+                'mcp-session-id': localStorage.getItem('mcp-session-id') || '',
+            },
+            body: JSON.stringify(request),
+        });
+
+        const result = await response.json();
+
+        // Check for errors in the response
+        if (result.error) {
+            throw new Error(`Error calling tool: ${result.error.message}`);
         }
 
-        // Handle and convert errors
-        throw new McpClientError(
-            `Error calling MCP tool: ${error instanceof Error ? error.message : String(error)}`
-        );
+        return result.result;
+    } catch (error) {
+        console.error(`Error calling MCP tool:`, error);
+        throw error;
     }
 }
 
@@ -210,12 +300,23 @@ export async function getFplAnswer(
     debugMode: boolean = false
 ): Promise<string> {
     try {
-        const result = await callMcpTool({
-            name: 'answer-fpl-question',
-            arguments: {
-                question,
-                debug_mode: debugMode,
-            },
+        // Make sure client is initialized - with retry logic for session issues
+        if (!isMcpClientInitialized()) {
+            try {
+                await initMcpClient();
+            } catch (error) {
+                // If initialization fails due to session issues, try once more with a clean state
+                console.log('Init failed, retrying with fresh session');
+                if (typeof window !== 'undefined') {
+                    localStorage.removeItem('mcp-session-id');
+                }
+                await initMcpClient();
+            }
+        }
+
+        const result = await callMcpTool('answer-fpl-question', {
+            question,
+            debug_mode: debugMode,
         });
 
         // Extract text content from the tool result
@@ -227,7 +328,7 @@ export async function getFplAnswer(
             return result.content[0].text;
         }
 
-        // Fallback: try different result formats
+        // Fallback for different result formats
         if (result && typeof result === 'object') {
             if (typeof result.text === 'string') {
                 return result.text;
@@ -237,25 +338,39 @@ export async function getFplAnswer(
                 return result.content;
             }
 
-            // Last resort - stringify
             return JSON.stringify(result);
         }
 
         return "Sorry, I couldn't find an answer.";
     } catch (error) {
-        if (error instanceof McpClientError) {
-            // Check if this is a session error
-            if (error.message.includes('session')) {
-                throw new McpClientError(
-                    'Your session has expired. Please restart the chat.',
-                    401
-                );
+        console.error('Error getting FPL answer:', error);
+
+        const errorMessage =
+            error instanceof Error ? error.message : String(error);
+
+        // Check if this is a session-related error
+        if (
+            errorMessage.includes('Session not found') ||
+            errorMessage.includes('404') ||
+            errorMessage.includes('unauthorized') ||
+            errorMessage.includes('401')
+        ) {
+            // Handle session expiration
+            if (typeof window !== 'undefined') {
+                localStorage.removeItem('mcp-session-id');
             }
+            throw new McpClientError(
+                'Your session has expired. Please restart the chat.',
+                -32000
+            );
+        }
+
+        // Rethrow other errors
+        if (error instanceof McpClientError) {
             throw error;
         }
-        throw new McpClientError(
-            `Error getting FPL answer: ${error instanceof Error ? error.message : String(error)}`
-        );
+
+        throw new McpClientError(`Error getting answer: ${errorMessage}`);
     }
 }
 
@@ -263,11 +378,8 @@ export async function getFplAnswer(
  * Get information about a team
  */
 export async function getTeamInfo(teamName: string): Promise<any> {
-    return callMcpTool({
-        name: 'get-team-info',
-        arguments: {
-            team_name: teamName,
-        },
+    return callMcpTool('get-team-info', {
+        team_name: teamName,
     });
 }
 
@@ -275,11 +387,8 @@ export async function getTeamInfo(teamName: string): Promise<any> {
  * Get information about a player
  */
 export async function getPlayerInfo(playerName: string): Promise<any> {
-    return callMcpTool({
-        name: 'get-player-info',
-        arguments: {
-            player_name: playerName,
-        },
+    return callMcpTool('get-player-info', {
+        player_name: playerName,
     });
 }
 
@@ -287,11 +396,8 @@ export async function getPlayerInfo(playerName: string): Promise<any> {
  * Get gameweek information
  */
 export async function getGameweekInfo(gameweekId?: number): Promise<any> {
-    return callMcpTool({
-        name: 'get-gameweek-info',
-        arguments: {
-            gameweek_id: gameweekId,
-        },
+    return callMcpTool('get-gameweek-info', {
+        gameweek_id: gameweekId,
     });
 }
 
@@ -301,10 +407,83 @@ export async function getGameweekInfo(gameweekId?: number): Promise<any> {
 export async function refreshFplData(
     forceFullUpdate: boolean = false
 ): Promise<any> {
-    return callMcpTool({
-        name: 'refresh-fpl-data',
+    return callMcpTool('refresh-fpl-data', {
+        force_full_update: forceFullUpdate,
+    });
+}
+
+let client: Client | null = null;
+let transport: StreamableHTTPClientTransport | null = null;
+
+export async function getMcpClient() {
+    if (!client) {
+        client = new Client({
+            name: 'FPL Chat Client',
+            version: '1.0.0',
+        });
+
+        // Initialize the transport with the API endpoint
+        transport = new StreamableHTTPClientTransport(
+            new URL('/api/mcp', window.location.origin)
+        );
+
+        await client.connect(transport);
+    }
+
+    return client;
+}
+
+export async function closeMcpClient() {
+    if (client && transport) {
+        await transport.close();
+        client = null;
+        transport = null;
+    }
+}
+
+// Helper function to get player stats
+export async function getPlayerStats(playerName: string) {
+    const client = await getMcpClient();
+    return client.callTool({
+        name: 'get-player-stats',
         arguments: {
-            force_full_update: forceFullUpdate,
+            playerName,
         },
     });
 }
+
+// Helper function to get team suggestions
+export async function getTeamSuggestions(options: {
+    budget?: number;
+    position?: 'GKP' | 'DEF' | 'MID' | 'FWD';
+    maxPlayers?: number;
+}) {
+    const client = await getMcpClient();
+    return client.callTool({
+        name: 'get-team-suggestions',
+        arguments: options,
+    });
+}
+
+// Helper function to get FPL team data
+export async function getFplTeams() {
+    const client = await getMcpClient();
+    return client.readResource({
+        uri: 'fpl://teams',
+    });
+}
+
+// Helper function to get player data
+export async function getPlayerData(playerId: string) {
+    const client = await getMcpClient();
+    return client.readResource({
+        uri: `fpl://players/${playerId}`,
+    });
+}
+
+// Export all functions
+export {
+    initMcpClient,
+    isMcpClientInitialized,
+    terminateMcpSession
+};

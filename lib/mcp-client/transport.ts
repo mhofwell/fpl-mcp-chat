@@ -1,103 +1,72 @@
 // lib/mcp-client/transport.ts
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-// Keep track of the client and transport instances
-let mcpClient: Client | null = null;
-let mcpTransport: StreamableHTTPClientTransport | null = null;
-
-/**
- * Initialize the MCP client and transport
- */
-export async function initMcpClient(): Promise<Client> {
-    // If we already have an initialized client, return it
-    if (mcpClient && mcpTransport) {
-        return mcpClient;
-    }
-
-    // Create a new client
-    mcpClient = new Client({
-        name: 'fpl-mcp-client',
-        version: '1.0.0'
-    });
-
-    // Get session ID if it exists in localStorage
-    const sessionId = typeof window !== 'undefined' ? localStorage.getItem('mcp-session-id') : null;
-
-    // Create a new transport with proper handling of errors
-    mcpTransport = new StreamableHTTPClientTransport(
-        new URL('/api/mcp', window.location.origin),
-        {
-            sessionId: sessionId || undefined
-        }
-    );
-
-    // Set up client error handler
-    mcpClient.onerror = (error) => {
-        console.error('MCP client error:', error);
-    };
-
-    // Connect the client to the transport
-    await mcpClient.connect(mcpTransport);
-
-    // Store the new session ID in localStorage if one was generated
-    if (mcpTransport.sessionId && (!sessionId || mcpTransport.sessionId !== sessionId)) {
-        localStorage.setItem('mcp-session-id', mcpTransport.sessionId);
-    }
-
-    return mcpClient;
-}
+// Client singleton
+let client: Client | null = null;
+let transport: StreamableHTTPClientTransport | null = null;
 
 /**
- * Check if the client is initialized and connected
+ * Check if the MCP client is initialized
  */
 export function isMcpClientInitialized(): boolean {
-    return !!mcpClient && !!mcpTransport;
+  return client !== null && transport !== null;
 }
 
 /**
- * Get the active client instance
+ * Initialize the MCP client
  */
-export function getMcpClient(): Client | null {
-    return mcpClient;
-}
-
-/**
- * Get the active transport instance
- */
-export function getMcpTransport(): StreamableHTTPClientTransport | null {
-    return mcpTransport;
-}
-
-/**
- * Close the client connection and clean up
- */
-export async function closeMcpClient(): Promise<void> {
-    if (mcpTransport) {
-        await mcpTransport.close();
-        mcpTransport = null;
+export async function initMcpClient(): Promise<Client> {
+  if (client && transport) {
+    return client;
+  }
+  
+  client = new Client({
+    name: "FPL Chat Client",
+    version: "1.0.0"
+  });
+  
+  // Initialize the transport with the API endpoint and session ID
+  const sessionId = typeof window !== 'undefined' ? localStorage.getItem('mcp-session-id') : null;
+  transport = new StreamableHTTPClientTransport(
+    new URL("/api/mcp", window.location.origin),
+    { 
+      sessionId: sessionId || undefined 
     }
-    mcpClient = null;
+  );
+  
+  await client.connect(transport);
+  
+  return client;
 }
 
 /**
- * Terminate the MCP session on the server
+ * Terminate the MCP session
  */
 export async function terminateMcpSession(): Promise<void> {
-    if (mcpTransport) {
-        try {
-            // This will make a DELETE request to the MCP endpoint with the session ID
-            await mcpTransport.terminateSession();
-        } catch (error) {
-            console.error('Error terminating MCP session:', error);
-        }
-        
-        // Clean up client resources
-        await closeMcpClient();
-    }
-    
-    // Remove the session ID from localStorage
-    if (typeof window !== 'undefined') {
+  if (client && transport) {
+    try {
+      // Delete session on server
+      if (transport.sessionId) {
+        await fetch('/api/mcp', {
+          method: 'DELETE',
+          headers: {
+            'mcp-session-id': transport.sessionId
+          }
+        });
+      }
+      
+      // Close transport and clear client references
+      await transport.close();
+    } catch (error) {
+      console.error('Error terminating session:', error);
+    } finally {
+      // Clean up client and localStorage regardless of success
+      client = null;
+      transport = null;
+      if (typeof window !== 'undefined') {
         localStorage.removeItem('mcp-session-id');
+      }
     }
+  }
 }

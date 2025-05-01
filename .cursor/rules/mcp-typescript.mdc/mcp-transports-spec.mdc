@@ -1,5 +1,5 @@
 ---
-description: 
+description: Building transports for the model context protocol. 
 globs: 
 alwaysApply: false
 ---

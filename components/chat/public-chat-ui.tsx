@@ -8,6 +8,8 @@ import {
     getFplAnswer,
 } from '@/lib/mcp-client';
 
+import { initMcpClient, callMcpTool } from '@/lib/mcp-client';
+
 interface Message {
     role: 'user' | 'assistant';
     content: string;
@@ -21,55 +23,39 @@ export default function ImprovedChatUI() {
     const [sessionInitialized, setSessionInitialized] = useState(false);
     const [initError, setInitError] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
-    const autoInitAttempted = useRef(false);
 
     // Check session and auto-init on mount
-useEffect(() => {
-    const initializeSession = async () => {
-        try {
-            // Don't even try to check for a session if we don't have a session ID in localStorage
-            const sessionId = localStorage.getItem('mcp-session-id');
-            let hasValidSession = false;
-            
-            if (sessionId) {
-                console.log('Found session ID in localStorage, checking validity...');
-                hasValidSession = await checkMcpSession();
-            }
+    useEffect(() => {
+        const initializeSession = async () => {
+            try {
+                setIsInitializing(true);
+                setInitError('');
 
-            if (hasValidSession) {
-                console.log('Found existing valid session');
+                // When first loading, always make a clean session
+                console.log('Component mounted, forcing fresh session...');
+                localStorage.removeItem('mcp-session-id');
+
+                // Initialize a new session
+                const sessionId = await initializeMcpSession();
+                console.log(
+                    'Session initialized successfully with ID:',
+                    sessionId
+                );
                 setSessionInitialized(true);
+            } catch (error) {
+                console.error('Error during session initialization:', error);
+                const errorMessage =
+                    error instanceof Error ? error.message : 'Unknown error';
+                setInitError(
+                    `Failed to initialize chat session: ${errorMessage}`
+                );
+            } finally {
                 setIsInitializing(false);
-                return;
             }
+        };
 
-            // Only attempt auto-init once
-            if (autoInitAttempted.current) {
-                setIsInitializing(false);
-                return;
-            }
-
-            autoInitAttempted.current = true;
-            console.log('Starting auto-initialization...');
-
-            // Auto-initialize the session
-            await initializeMcpSession();
-            console.log('Session initialized successfully');
-            setSessionInitialized(true);
-        } catch (error) {
-            console.error('Error during session initialization:', error);
-            const errorMessage =
-                error instanceof Error ? error.message : 'Unknown error';
-            setInitError(
-                `Failed to initialize chat session: ${errorMessage}`
-            );
-        } finally {
-            setIsInitializing(false);
-        }
-    };
-
-    initializeSession();
-}, []);
+        initializeSession();
+    }, []);
 
     // Initialize MCP session (manual fallback)
     const handleInitSession = async (e: React.FormEvent) => {
@@ -126,20 +112,27 @@ useEffect(() => {
             console.error('Error getting response:', error);
 
             // Check if this is a session error
-            if (error instanceof Error && error.message.includes('session')) {
+            const errorMessage =
+                error instanceof Error ? error.message : String(error);
+
+            if (
+                errorMessage.includes('session') ||
+                errorMessage.includes('restart')
+            ) {
                 setSessionInitialized(false);
                 setInitError(
                     'Your session has expired. Please restart the chat.'
                 );
-            } else {
-                // Add error message to UI
-                const errorMessageObj: Message = {
-                    role: 'assistant',
-                    content:
-                        'Sorry, there was an error processing your request. Please try again.',
-                };
-                setMessages((prev) => [...prev, errorMessageObj]);
+                return;
             }
+
+            // Add error message to UI
+            const errorMessageObj: Message = {
+                role: 'assistant',
+                content:
+                    'Sorry, there was an error processing your request. Please try again.',
+            };
+            setMessages((prev) => [...prev, errorMessageObj]);
         } finally {
             setIsProcessing(false);
         }

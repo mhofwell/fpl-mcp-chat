@@ -1,7 +1,7 @@
 // app/api/mcp/route.ts
 import { NextRequest } from 'next/server';
 import { randomUUID } from 'crypto';
-import { getMcpServer, storeSession, updateSessionActivity, getSession } from '@/lib/mcp-server';
+import { getMcpServer, storeSession, updateSessionActivity, getSession, deleteSession } from '@/lib/mcp-server';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 // Map to store transports by session ID
@@ -52,7 +52,9 @@ export async function POST(request: NextRequest) {
   const sessionId = request.headers.get('mcp-session-id');
   const body = await request.json();
   
-  let transport: StreamableHTTPServerTransport;
+  let transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => "default-temp-id"
+  });
   let server;
   
   // If we have a valid session ID, use its transport
@@ -88,7 +90,30 @@ export async function POST(request: NextRequest) {
     await server.connect(transport);
   } 
   else {
-    // Invalid request
+    // Check if incoming requests have valid session IDs from Redis
+    if (sessionId) {
+      // Check if we have transport, if not but session exists in Redis, create one
+      if (!transports[sessionId]) {
+        const sessionData = await getSession(sessionId);
+        if (sessionData) {
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => sessionId,
+            onsessioninitialized: async (sid) => {
+              transports[sid] = transport;
+            }
+          });
+          
+          // Connect to MCP server
+          server = getMcpServer();
+          await server.connect(transport);
+        }
+      } else {
+        transport = transports[sessionId];
+      }
+    }
+  }
+  
+  if (!transport) {
     return Response.json(
       {
         jsonrpc: '2.0',
@@ -96,10 +121,15 @@ export async function POST(request: NextRequest) {
           code: -32000,
           message: 'Bad Request: No valid session ID provided',
         },
-        id: null,
+        id: body.id || null,
       },
       { status: 400 }
     );
+  }
+  
+  // Get our MCP server if it wasn't already created
+  if (!server) {
+    server = getMcpServer();
   }
   
   // Create a response transformer
@@ -178,9 +208,7 @@ export async function DELETE(request: NextRequest) {
   
   // Also clean up session from Redis
   try {
-    await import('@/lib/mcp-server').then(({ deleteSession }) => {
-      deleteSession(sessionId);
-    });
+    await deleteSession(sessionId);
   } catch (error) {
     console.error('Error deleting session:', error);
   }

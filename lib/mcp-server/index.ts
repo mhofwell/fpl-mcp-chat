@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerFplResources } from "./resources";
 import { registerFplTools } from "./tools";
 import { registerFplPrompts } from "./prompts";
-import { getSession, storeSession, updateSessionActivity } from "./session";
+import { getSession, storeSession, updateSessionActivity, deleteSession } from "./session";
 
 // Singleton pattern for the MCP server
 let server: McpServer | null = null;
@@ -34,4 +34,4 @@ export function getMcpServer() {
 }
 
 // Export session utilities for easy access
-export { getSession, storeSession, updateSessionActivity };
+export { getSession, storeSession, updateSessionActivity, deleteSession };

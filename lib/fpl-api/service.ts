@@ -20,7 +20,7 @@ import {
 } from './entity-extractor';
 import { fetchWithCache } from './cache-helper';
 import { cacheInvalidator } from './cache-invalidator';
-import { initializeServerMcpSession } from '../mcp-server/server-init';
+import { initializeServerMcpSession } from '../../../mcp-server/server-init';
 
 /**
  * Type for question processing result

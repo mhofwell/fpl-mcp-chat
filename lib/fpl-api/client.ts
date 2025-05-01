@@ -25,6 +25,8 @@ export function calculateTtl(endpoint: string): number {
     }
 }
 
+
+
 // Basic FPL API client
 export const fplApi = {
     getBootstrapStatic: async () => {

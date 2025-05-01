@@ -1,5 +1,5 @@
 // app/chat/page.tsx
-import ChatUI from '@/components/chat/chat-ui';
+import ChatUI from '@/components/chat/public-chat-ui';
 
 export default function ChatPage() {
     return (

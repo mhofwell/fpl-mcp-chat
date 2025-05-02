@@ -15,6 +15,13 @@ export default async function Home() {
             Get instant answers to all your FPL questions - stats, players, strategies, and more
           </p>
           
+          <div className="w-full max-w-3xl mb-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">FPL Chat</h2>
+              <p className="text-sm text-muted-foreground">Your conversations are saved automatically</p>
+            </div>
+          </div>
+          
           <PublicChatUI />
         </main>
       </div>

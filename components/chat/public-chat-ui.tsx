@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { processUserMessage } from '@/app/actions/chat';
+import { initializeMcpSession } from '@/app/actions/mcp-tools';
 
 interface Message {
     role: 'user' | 'assistant';
@@ -19,6 +20,40 @@ export default function ChatUI() {
             ? localStorage.getItem('fpl_chat_id')
             : null
     );
+    const [mcpSessionId, setMcpSessionId] = useState<string | null>(null);
+    const [isInitializing, setIsInitializing] = useState(true);
+
+    useEffect(() => {
+        async function initSession() {
+            // First check localStorage
+            const storedSessionId = localStorage.getItem('mcp-session-id');
+            
+            if (storedSessionId) {
+                console.log('Found existing session ID:', storedSessionId);
+                setMcpSessionId(storedSessionId);
+                setIsInitializing(false);
+            } else {
+                setIsInitializing(true);
+                try {
+                    console.log('Initializing new MCP session...');
+                    const newSessionId = await initializeMcpSession();
+                    if (newSessionId) {
+                        setMcpSessionId(newSessionId);
+                        localStorage.setItem('mcp-session-id', newSessionId);
+                        console.log('MCP session initialized:', newSessionId);
+                    } else {
+                        console.error('Failed to initialize MCP session');
+                    }
+                } catch (error) {
+                    console.error('Error initializing MCP session:', error);
+                } finally {
+                    setIsInitializing(false);
+                }
+            }
+        }
+        
+        initSession();
+    }, []); // Remove mcpSessionId dependency to ensure it only runs once
 
     // Scroll to bottom when messages change
     useEffect(() => {
@@ -27,7 +62,7 @@ export default function ChatUI() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!input.trim() || isProcessing) return;
+        if (!input.trim() || isProcessing || isInitializing) return;
 
         // Add user message to UI immediately
         const userMessage: Message = { role: 'user', content: input };
@@ -39,12 +74,19 @@ export default function ChatUI() {
             // Process message via server action
             const response = await processUserMessage(
                 chatId,
-                userMessage.content
+                userMessage.content,
+                mcpSessionId || undefined
             );
 
             if (response.chatId && response.chatId !== chatId) {
                 setChatId(response.chatId);
                 localStorage.setItem('fpl_chat_id', response.chatId);
+            }
+            
+            // Store the MCP session ID if we got a new one
+            if (response.mcpSessionId && response.mcpSessionId !== mcpSessionId) {
+                setMcpSessionId(response.mcpSessionId);
+                localStorage.setItem('mcp-session-id', response.mcpSessionId);
             }
 
             // Add assistant response
@@ -100,15 +142,15 @@ export default function ChatUI() {
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="Ask about FPL..."
+                        placeholder={isInitializing ? "Initializing session..." : "Ask about FPL..."}
                         className="flex-1 p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                        disabled={isProcessing}
+                        disabled={isProcessing || isInitializing}
                     />
                     <Button
                         type="submit"
-                        disabled={!input.trim() || isProcessing}
+                        disabled={!input.trim() || isProcessing || isInitializing}
                     >
-                        {isProcessing ? 'Thinking...' : 'Send'}
+                        {isInitializing ? 'Initializing...' : isProcessing ? 'Thinking...' : 'Send'}
                     </Button>
                 </form>
             </div>

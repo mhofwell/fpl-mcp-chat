@@ -20,8 +20,6 @@ import {
 } from './entity-extractor';
 import { fetchWithCache } from './cache-helper';
 import { cacheInvalidator } from './cache-invalidator';
-import { initStandaloneMcpClient } from '../mcp-client/index';
-
 /**
  * Type for question processing result
  */
@@ -571,13 +569,6 @@ export const fplApiService = {
 
             // Set up invalidation schedule with proper timeout handling
             await cacheInvalidator.setupScheduledInvalidation(gameweeks);
-
-            // Initialize the standalone MCP client instead of the server session
-            if (typeof window === 'undefined') {
-                // Only on server-side
-                await initStandaloneMcpClient();
-                console.log('Connected to standalone MCP server for server-side operations');
-            }
 
             // Check if there's an active gameweek and set up more frequent invalidation
             const isActive = await this.isGameweekActive();

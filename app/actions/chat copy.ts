@@ -2,7 +2,7 @@
 'use server';
 
 import { Anthropic } from '@anthropic-ai/sdk';
-import { TextBlock, ToolUseBlock } from '@anthropic-ai/sdk/resources';
+import { TextBlock } from '@anthropic-ai/sdk/resources';
 // we will need to use the supabase client to store the chat history lets do this later
 //
 import { createClient } from '@/utils/supabase/server';
@@ -44,8 +44,8 @@ export async function processUserMessage(
         }
     }
 
-    // Store user message
-    if (user && chatId) {
+    // Store message
+    if (user) {
         await supabase.from('messages').insert({
             chat_id: chatId,
             content: message,
@@ -61,7 +61,7 @@ export async function processUserMessage(
             system: `You are a Fantasy Premier League (FPL) assistant. You have access to tools for retrieving FPL data.
                When asked about players, teams, fixtures, or gameweeks, use the appropriate tools to get accurate data.
                Keep responses concise but informative.`,
-            messages: [{ role: 'user' as const, content: message }],
+            messages: [{ role: 'user', content: message }],
             tools: [
                 {
                     name: 'get-player',
@@ -143,85 +143,76 @@ export async function processUserMessage(
             tool_choice: { type: 'auto' },
         });
 
-        // Check if the response includes any tool calls
-        const toolCalls = response.content.filter(
-            (block): block is ToolUseBlock => block.type === 'tool_use'
+        // Handle tool calls if any were made
+        const toolUses = response.content.filter(
+            (item) => item.type === 'tool_use'
         );
 
-        let answer = '';
+        if (toolUses.length > 0) {
+            // Create an array to store message content items
+            const messageContent = [...response.content];
 
-        if (toolCalls.length > 0) {
-            // Process tool calls and create a new message
-            const userMessage = { role: 'user' as const, content: message };
-            
-            // Run the tools and get their results
-            const toolResults = await Promise.all(
-                toolCalls.map(async (toolCall) => {
+            // Process each tool call and add tool results
+            for (const toolUse of toolUses) {
+                if (toolUse.type === 'tool_use') {
+                    // Call the MCP tool
                     const result = await callMcpTool(
-                        toolCall.name,
-                        toolCall.input as Record<string, any>
+                        toolUse.name,
+                        toolUse.input as Record<string, any>
                     );
-                    
-                    return {
-                        toolCall,
-                        result: result.success ? result.result : { error: result.error }
-                    };
-                })
-            );
-            
-            // Format the tool results as text for the follow-up message
-            const toolResultsText = toolResults
-                .map(({ toolCall, result }) => 
-                    `Results from ${toolCall.name}: ${JSON.stringify(result)}`
-                )
-                .join('\n\n');
-                
-            // Send a follow-up message with the tool results
+
+                    // Add the tool result to the messages array
+                    messageContent.push({
+                        type: 'tool_result',
+                        tool_use_id: toolUse.id,
+                        content: result.success
+                            ? JSON.stringify(result.result)
+                            : JSON.stringify({ error: result.error }),
+                    });
+                }
+            }
+
+            // Call Claude again with tool results
             const finalResponse = await anthropic.messages.create({
                 model: 'claude-3-5-sonnet-20241022',
                 max_tokens: 1000,
                 system: `You are a Fantasy Premier League (FPL) assistant.`,
                 messages: [
-                    userMessage,
-                    { 
-                        role: 'user' as const, 
-                        content: `I've run the tools you requested. Here are the results:\n\n${toolResultsText}\n\nPlease provide a final response to my original question: "${message}"`
-                    }
+                    { role: 'user', content: message },
+                    { role: 'assistant', content: messageContent },
                 ],
             });
 
-            // Extract final answer
-            const textBlock = finalResponse.content.find(
-                (block): block is TextBlock => block.type === 'text'
-            );
-            answer = textBlock?.text || '';
-        } else {
-            // If no tool calls were made, extract the answer from the original response
-            const textBlock = response.content.find(
-                (block): block is TextBlock => block.type === 'text'
-            );
-            answer = textBlock?.text || '';
+            // Extract and return Claude's final response
+            const answer =
+                finalResponse.content[0].type === 'text'
+                    ? finalResponse.content[0].text
+                    : '';
+
+            // Store Claude's response for authenticated user
+            if (user && answer) {
+                await supabase.from('messages').insert({
+                    chat_id: chatId,
+                    content: answer,
+                    role: 'assistant',
+                });
+            }
+
+            return {
+                success: true,
+                answer,
+            };
         }
 
-        // Store Claude's response for authenticated user
-        if (user && chatId && answer) {
-            await supabase.from('messages').insert({
-                chat_id: chatId,
-                content: answer,
-                role: 'assistant',
-            });
-        }
-
-        return {
-            success: true,
-            chatId,
-            answer,
-        };
+        // If no tool calls were made, just return the original response
+        const answer =
+            response.content[0].type === 'text' ? response.content[0].text : '';
+        return { success: true, chatId, answer };
+        
     } catch (error) {
         console.error('Error processing message with Claude:', error);
         return {
             success: false,
-            chatId,
             answer: 'Sorry, I encountered an error while processing your question.',
         };
     }

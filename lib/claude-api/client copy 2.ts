@@ -1,6 +1,13 @@
 import { Anthropic } from '@anthropic-ai/sdk';
-import { Tool } from '@anthropic-ai/sdk/resources';
-import { MessageParam, ToolUseBlock } from '@anthropic-ai/sdk/resources';
+import { fplApiService } from '../fpl-api/service';
+import { ExtractedEntities } from '../fpl-api/entity-extractor';
+import {
+    Message,
+    MessageParam,
+    ToolUseBlock,
+    Tool,
+    ToolResult,
+} from '@anthropic-ai/sdk/resources';
 
 // Get environment
 const appEnv = process.env.APP_ENV || 'development';
@@ -110,6 +117,42 @@ export interface ToolImplementation {
     (input: any): Promise<string>;
 }
 
+/**
+ * Retry a function with exponential backoff
+ * @param fn Function to retry
+ * @param maxRetries Maximum number of retries
+ * @param baseDelay Base delay in milliseconds
+ */
+async function withRetry<T>(
+    fn: () => Promise<T>,
+    maxRetries: number = MAX_RETRIES,
+    baseDelay: number = RETRY_DELAY_MS
+): Promise<T> {
+    let lastError: Error;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+
+            if (attempt === maxRetries) {
+                break;
+            }
+
+            // Calculate delay with exponential backoff and jitter
+            const delay =
+                baseDelay * Math.pow(2, attempt) * (0.5 + Math.random() / 2);
+            console.log(
+                `Retrying after ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries})`
+            );
+            await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+    }
+
+    throw lastError;
+}
+
 // Basic Claude API client
 export const claudeApi = {
     /**
@@ -117,22 +160,60 @@ export const claudeApi = {
      * @param question User's question
      * @param manualContext Optional manual context to provide (otherwise will be generated)
      */
-    async getResponse(question: string): Promise<string> {
+    async getResponse(
+        question: string,
+        manualContext?: string
+    ): Promise<string> {
         try {
             let fplContext: string;
+
+            // Process the question to extract relevant FPL context if not provided
+            if (!manualContext) {
+                const { context } =
+                    await fplApiService.processQuestion(question);
+                fplContext = context;
+            } else {
+                fplContext = manualContext;
+            }
+
+            // Add default context if processed context is too short
+            if (fplContext.length < 50) {
+                const currentGameweek =
+                    await fplApiService.getCurrentGameweek();
+                fplContext += `\nCurrent gameweek: ${
+                    currentGameweek?.name || 'Unknown'
+                }\n`;
+            }
+
+            // Log the request in development mode
+            if (isDevMode) {
+                console.log('[DEV] Claude API request:', {
+                    question,
+                    contextLength: fplContext.length,
+                });
+                // Print a preview of the context in dev mode
+                console.log(
+                    '[DEV] Context preview:',
+                    fplContext.substring(0, 500) +
+                        (fplContext.length > 500 ? '...' : '')
+                );
+            }
+
             // Send the request to Claude with retry logic
-            const response = await anthropic.messages.create({
-                model: CLAUDE_MODEL,
-                max_tokens: MAX_TOKENS,
-                system: FPL_SYSTEM_PROMPT,
-                messages: [
-                    {
-                        role: 'user',
-                        content: `Fantasy Premier League Question: ${question}\n\nHere's the relevant FPL data:\n\n${fplContext}`,
-                    },
-                ],
-                tools: FPL_TOOLS,
-            });
+            const response = await withRetry(() =>
+                anthropic.messages.create({
+                    model: CLAUDE_MODEL,
+                    max_tokens: MAX_TOKENS,
+                    system: FPL_SYSTEM_PROMPT,
+                    messages: [
+                        {
+                            role: 'user',
+                            content: `Fantasy Premier League Question: ${question}\n\nHere's the relevant FPL data:\n\n${fplContext}`,
+                        },
+                    ],
+                    tools: FPL_TOOLS,
+                })
+            );
 
             // Check if content block is a text block
             const textBlock = response.content.find(

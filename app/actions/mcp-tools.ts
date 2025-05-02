@@ -1,17 +1,28 @@
-'use server'
+// app/actions/mcp-tools.ts
+'use server';
 
 import { initStandaloneMcpClient } from '@/lib/mcp-client';
 
 // Configure internal URL
-const MCP_SERVER_INTERNAL_URL = process.env.EXPRESS_MCP_SERVER_PRIVATE || 'http://localhost:3001';
+const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'http://localhost:3001';
 
 export async function callMcpTool(toolName: string, args: Record<string, any>) {
-  const client = await initStandaloneMcpClient({
-    baseUrl: `${MCP_SERVER_INTERNAL_URL}/mcp`
-  });
-  
-  return client.callTool({
-    name: toolName,
-    arguments: args
-  });
+    try {
+        const client = await initStandaloneMcpClient({
+            baseUrl: `${MCP_SERVER_URL}/mcp`,
+        });
+
+        const result = await client.callTool({
+            name: toolName,
+            arguments: args,
+        });
+
+        return { success: true, result };
+    } catch (error) {
+        console.error('Error calling MCP tool:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+        };
+    }
 }

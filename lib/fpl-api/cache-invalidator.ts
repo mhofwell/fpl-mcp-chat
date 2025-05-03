@@ -1,5 +1,6 @@
 // lib/fpl-api/cache-invalidator.ts
 import redis from '../redis/redis-client';
+import { Gameweek } from '@/types/fpl';
 
 /**
  * FPL Cache Invalidation Service
@@ -69,6 +70,46 @@ export const cacheInvalidator = {
     },
 
     /**
+     * Optimize live data caching by removing unnecessary past gameweek data
+     */
+    async optimizeLiveDataCaching(): Promise<void> {
+        try {
+            // Get all gameweek live cache keys
+            const liveKeys = await redis.keys('fpl:gameweek:*:live');
+
+            // Get current gameweek from cache
+            const gameweeksData = await redis.get('fpl:gameweeks');
+            if (!gameweeksData) return;
+
+            const gameweeks = JSON.parse(gameweeksData);
+            const currentGameweek = gameweeks.find(
+                (gw: Gameweek) => gw.is_current
+            );
+
+            if (!currentGameweek) return;
+
+            // Identify keys for past gameweeks
+            const pastGameweekKeys = liveKeys.filter((key) => {
+                const gwMatch = key.match(/fpl:gameweek:(\d+):live/);
+                if (!gwMatch) return false;
+
+                const gwId = parseInt(gwMatch[1]);
+                return gwId < currentGameweek.id && !key.includes('fixture');
+            });
+
+            // Remove past gameweek live data
+            if (pastGameweekKeys.length > 0) {
+                await redis.del(...pastGameweekKeys);
+                console.log(
+                    `Removed ${pastGameweekKeys.length} unnecessary past gameweek live cache entries`
+                );
+            }
+        } catch (error) {
+            console.error('Error optimizing live data cache:', error);
+        }
+    },
+
+    /**
      * Schedule invalidation for upcoming deadline
      * @param deadlineTime ISO date string for the deadline
      * @param gameweekId The gameweek ID to invalidate after deadline
@@ -134,6 +175,9 @@ export const cacheInvalidator = {
                 );
             }
         }
+
+        // Run cache optimization to clean up past gameweek data
+        await this.optimizeLiveDataCaching();
 
         return timeouts;
     },

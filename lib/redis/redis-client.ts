@@ -1,7 +1,9 @@
 import Redis from 'ioredis';
 
 // Get environment variables
-const redisUrl = process.env.REDIS_URL ? `${process.env.REDIS_URL}?family=0` : 'redis://localhost:6379?family=0';
+const redisUrl = process.env.REDIS_URL
+    ? `${process.env.REDIS_URL}?family=0`
+    : 'redis://localhost:6379?family=0';
 const appEnv = process.env.RAILWAY_ENVIRONMENT_NAME || 'development';
 
 // Log environment info for debugging
@@ -15,8 +17,15 @@ console.log(`- Using Redis URL: ${redisUrl}`);
 const getRedisClient = () => {
     console.log(`Initializing Redis in ${appEnv} mode`);
 
-    // Create and return Redis client
-    const client = new Redis(redisUrl);
+    const client = new Redis(redisUrl, {
+        maxRetriesPerRequest: 3,
+        connectTimeout: 10000,
+        enableReadyCheck: true,
+        retryStrategy(times) {
+            const delay = Math.min(times * 100, 2000);
+            return delay;
+        },
+    });
 
     // Log connection status based on environment
     client.on('error', (err) => {

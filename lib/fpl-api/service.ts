@@ -1,5 +1,4 @@
-// lib/fpl-api/service.ts (refactored)
-
+// lib/fpl-api/service.ts
 import { fplApi } from './client';
 import redis from '../redis/redis-client';
 import { Team, Player, Gameweek, Fixture } from '@/types/fpl';
@@ -13,20 +12,9 @@ import {
     GameweekLiveResponse,
 } from '@/types/fpl-api-responses';
 import { calculateTtl } from './client';
-import {
-    extractEntities,
-    formatEntityContext,
-    ExtractedEntities,
-} from './entity-extractor';
 import { fetchWithCache } from './cache-helper';
 import { cacheInvalidator } from './cache-invalidator';
-/**
- * Type for question processing result
- */
-export interface ProcessedQuestion {
-    context: string;
-    entities: ExtractedEntities;
-}
+import { createClient } from '@/utils/supabase/server';
 
 /**
  * Type for filtering players
@@ -34,16 +22,6 @@ export interface ProcessedQuestion {
 export interface PlayerFilterOptions {
     teamId?: number;
     position?: string;
-}
-
-/**
- * Type for additional data in question processing
- */
-export interface AdditionalQuestionData {
-    currentGameweek?: string;
-    fixtures?: GameweekFixtures[];
-    playerDetails?: PlayerDetailWithTeam[];
-    [key: string]: any;
 }
 
 /**
@@ -65,7 +43,7 @@ export interface PlayerDetailWithTeam {
 }
 
 /**
- * Service for handling FPL data with Redis caching
+ * Service for handling FPL data with Redis caching and Supabase persistence
  */
 export const fplApiService = {
     /**
@@ -128,7 +106,7 @@ export const fplApiService = {
                             full_name: `${player.first_name} ${player.second_name}`,
                             team_id: player.team,
                             position,
-                            // Additional properties
+                            // Additional properties - cached but not persisted
                             first_name: player.first_name,
                             second_name: player.second_name,
                             element_type: player.element_type,
@@ -200,11 +178,11 @@ export const fplApiService = {
     /**
      * Get fixtures for a specific gameweek
      */
-    async getFixtures(gameweekId?: number): Promise<Fixture[]> {
+    async getFixtures(gameweekId?: number): Promise<FplFixture[]> {
         // Generate cache key based on filters
         const cacheKey = `fpl:fixtures${gameweekId ? `:gw:${gameweekId}` : ''}`;
 
-        return fetchWithCache<Fixture[]>(
+        return fetchWithCache<FplFixture[]>(
             cacheKey,
             async () => {
                 const fixturesData = await fplApi.getFixtures();
@@ -215,6 +193,13 @@ export const fplApiService = {
                     away_team_id: fixture.team_a,
                     kickoff_time: fixture.kickoff_time,
                     finished: fixture.finished,
+                    // Include scores for finished matches
+                    team_h_score: fixture.finished
+                        ? fixture.team_h_score
+                        : null,
+                    team_a_score: fixture.finished
+                        ? fixture.team_a_score
+                        : null,
                     last_updated: new Date().toISOString(),
                 }));
 
@@ -244,6 +229,102 @@ export const fplApiService = {
             },
             'player-detail'
         );
+    },
+
+    /**
+     * Get player's gameweek stats (current season)
+     */
+    async getPlayerGameweekStats(
+        playerId: number,
+        gameweekId: number
+    ): Promise<any> {
+        // First try cache
+        const cacheKey = `fpl:player:${playerId}:gameweek:${gameweekId}`;
+
+        try {
+            const cachedData = await redis.get(cacheKey);
+            if (cachedData) {
+                return JSON.parse(cachedData);
+            }
+        } catch (error) {
+            console.warn(`Redis cache error for ${cacheKey}:`, error);
+        }
+
+        // Then try database for historical data
+        try {
+            const supabase = await createClient();
+            const { data, error } = await supabase
+                .from('player_gameweek_stats')
+                .select('*')
+                .eq('player_id', playerId)
+                .eq('gameweek_id', gameweekId)
+                .single();
+
+            if (data && !error) {
+                // Cache the result
+                await redis.set(
+                    cacheKey,
+                    JSON.stringify(data),
+                    'EX',
+                    60 * 60 * 12
+                ); // 12 hours
+                return data;
+            }
+        } catch (dbError) {
+            console.warn(`Database error for player stats:`, dbError);
+        }
+
+        // Finally try API for live data
+        try {
+            const liveData = await this.getLiveGameweek(gameweekId);
+            if (
+                liveData &&
+                liveData.elements &&
+                liveData.elements[playerId.toString()]
+            ) {
+                const playerData = liveData.elements[playerId.toString()];
+
+                // Cache the result
+                await redis.set(
+                    cacheKey,
+                    JSON.stringify(playerData),
+                    'EX',
+                    60 * 15
+                ); // 15 minutes
+                return playerData;
+            }
+        } catch (apiError) {
+            console.error(`API error fetching live data:`, apiError);
+        }
+
+        return null;
+    },
+
+    /**
+     * Get player's season stats from history
+     */
+    async getPlayerSeasonStats(
+        playerId: number,
+        season?: string
+    ): Promise<any> {
+        // Get player details which contains history_past
+        const playerDetail = await this.getPlayerDetail(playerId);
+
+        if (!playerDetail || !playerDetail.history_past) {
+            return null;
+        }
+
+        // If season specified, find that season
+        if (season) {
+            return (
+                playerDetail.history_past.find(
+                    (s) => s.season_name === season
+                ) || null
+            );
+        }
+
+        // Otherwise return all seasons
+        return playerDetail.history_past;
     },
 
     /**
@@ -320,84 +401,134 @@ export const fplApiService = {
     },
 
     /**
-     * Process a user's FPL question to extract relevant entities and context
+     * Update player stats in database for completed matches
      */
-    async processQuestion(question: string): Promise<{
-        context: string;
-        entities: any;
-    }> {
+    async updatePlayerStats(gameweekId: number): Promise<boolean> {
         try {
-            // Fetch all necessary data
-            const [teams, players, gameweeks] = await Promise.all([
-                this.getTeams(),
-                this.getPlayers(),
-                this.getGameweeks(),
-            ]);
+            const supabase = await createClient();
+            const liveData = await this.getLiveGameweek(gameweekId);
 
-            // Extract entities from the question
-            const entities = extractEntities(
-                question,
-                players,
-                teams,
-                gameweeks
+            if (!liveData || !liveData.elements) {
+                return false;
+            }
+
+            // Check if gameweek is finished
+            const gameweeks = await this.getGameweeks();
+            const gameweek = gameweeks.find((gw) => gw.id === gameweekId);
+
+            if (!gameweek || !gameweek.finished) {
+                console.log(
+                    `Gameweek ${gameweekId} not yet finished, skipping permanent stats update`
+                );
+                return false;
+            }
+
+            console.log(
+                `Updating player stats for completed gameweek ${gameweekId}`
             );
 
-            // Gather additional data based on entities
-            const additionalData: any = {};
+            // Process player stats
+            const playerStats = [];
 
-            // Add current gameweek info if not already included
-            if (entities.gameweeks.length === 0) {
-                const currentGameweek = await this.getCurrentGameweek();
-                if (currentGameweek) {
-                    additionalData.currentGameweek = `${currentGameweek.name} (Deadline: ${currentGameweek.deadline_time})`;
+            for (const [elementId, data] of Object.entries(liveData.elements)) {
+                const stats = data.stats;
+                if (stats.minutes > 0) {
+                    // Only record if player played
+                    playerStats.push({
+                        player_id: parseInt(elementId),
+                        gameweek_id: gameweekId,
+                        minutes: stats.minutes || 0,
+                        goals_scored: stats.goals_scored || 0,
+                        assists: stats.assists || 0,
+                        clean_sheets: stats.clean_sheets || 0,
+                        goals_conceded: stats.goals_conceded || 0,
+                        own_goals: stats.own_goals || 0,
+                        penalties_saved: stats.penalties_saved || 0,
+                        penalties_missed: stats.penalties_missed || 0,
+                        yellow_cards: stats.yellow_cards || 0,
+                        red_cards: stats.red_cards || 0,
+                        saves: stats.saves || 0,
+                        bonus: stats.bonus || 0,
+                        total_points: stats.total_points || 0,
+                        created_at: new Date().toISOString(),
+                    });
                 }
             }
 
-            // Add fixtures for relevant gameweeks
-            if (entities.gameweeks.length > 0) {
-                const fixturesPromises = entities.gameweeks.map((gw) =>
-                    this.getFixtures(gw.id).then((fixtures) => ({
-                        gameweekId: gw.id,
-                        fixtures,
-                    }))
-                );
-                const fixturesResults = await Promise.all(fixturesPromises);
-                additionalData.fixtures = fixturesResults;
+            // Update in batches
+            const BATCH_SIZE = 50;
+            for (let i = 0; i < playerStats.length; i += BATCH_SIZE) {
+                const batch = playerStats.slice(i, i + BATCH_SIZE);
+                const { error } = await supabase
+                    .from('player_gameweek_stats')
+                    .upsert(batch, { onConflict: 'player_id, gameweek_id' });
+
+                if (error) {
+                    console.error(`Error updating player stats batch:`, error);
+                }
             }
 
-            // Add player details for mentioned players
-            if (entities.players.length > 0) {
-                const playerDetailsPromises = entities.players.map((player) =>
-                    this.getPlayerDetail(player.id).then((details) => {
-                        // Find the team name for this player
-                        const team = teams.find((t) => t.id === player.team_id);
-                        return {
-                            playerId: player.id,
-                            playerName: player.web_name,
-                            teamName: team?.name || 'Unknown Team',
-                            details,
-                        };
-                    })
-                );
-                const playerDetails = await Promise.all(playerDetailsPromises);
-                additionalData.playerDetails = playerDetails;
-            }
-
-            // Format everything into a context string for Claude
-            const context = formatEntityContext(entities, additionalData);
-
-            return {
-                context,
-                entities,
-            };
+            console.log(
+                `Updated stats for ${playerStats.length} players in gameweek ${gameweekId}`
+            );
+            return true;
         } catch (error) {
-            console.error('Error processing FPL question:', error);
-            throw error;
+            console.error('Error updating player stats:', error);
+            return false;
         }
     },
 
     /**
-     * Updates all FPL data in Redis cache
+     * Update fixture results in database for completed fixtures
+     */
+    async updateFixtureResults(): Promise<boolean> {
+        try {
+            const supabase = await createClient();
+            const fixtures = await this.getFixtures();
+
+            // Filter for completed fixtures with scores
+            const completedFixtures = fixtures.filter(
+                (f) =>
+                    f.finished &&
+                    f.team_h_score !== null &&
+                    f.team_a_score !== null
+            );
+
+            console.log(
+                `Updating ${completedFixtures.length} completed fixture results`
+            );
+
+            // Update in batches
+            const BATCH_SIZE = 50;
+            for (let i = 0; i < completedFixtures.length; i += BATCH_SIZE) {
+                const batch = completedFixtures
+                    .slice(i, i + BATCH_SIZE)
+                    .map((fixture) => ({
+                        id: fixture.id,
+                        team_h_score: fixture.team_h_score,
+                        team_a_score: fixture.team_a_score,
+                        finished: fixture.finished,
+                        last_updated: new Date().toISOString(),
+                    }));
+
+                const { error } = await supabase
+                    .from('fixtures')
+                    .upsert(batch, { onConflict: 'id' });
+
+                if (error) {
+                    console.error(`Error updating fixture results:`, error);
+                }
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Error updating fixture results:', error);
+            return false;
+        }
+    },
+
+    /**
+     * Updates all FPL data in Redis cache and database where appropriate
      * This would typically be called by a cron job
      */
     async updateAllData(): Promise<boolean> {
@@ -470,6 +601,8 @@ export const fplApiService = {
                 away_team_id: fixture.team_a,
                 kickoff_time: fixture.kickoff_time,
                 finished: fixture.finished,
+                team_h_score: fixture.team_h_score,
+                team_a_score: fixture.team_a_score,
                 last_updated: new Date().toISOString(),
             }));
 
@@ -537,6 +670,15 @@ export const fplApiService = {
 
             // Execute all Redis operations in a single round-trip
             await pipeline.exec();
+
+            // Update database with completed fixture results
+            await this.updateFixtureResults();
+
+            // Update player stats for completed gameweeks
+            const completedGameweeks = gameweeks.filter((gw: Gameweek) => gw.finished);
+            for (const gameweek of completedGameweeks) {
+                await this.updatePlayerStats(gameweek.id);
+            }
 
             // Set up deadline-based cache invalidation
             const upcomingGameweeks = gameweeks.filter((gw: Gameweek) => {

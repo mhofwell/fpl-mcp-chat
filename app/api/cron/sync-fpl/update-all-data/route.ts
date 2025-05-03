@@ -1,4 +1,4 @@
-import { checkForUpdates } from '@/lib/fpl-api/fpl-data-sync';
+import { checkForUpdates, syncFplData } from '@/lib/fpl-api/fpl-data-sync';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -9,10 +9,11 @@ export async function POST(request: Request) {
     }
 
     try {
-        const result = await checkForUpdates();
+        // Use syncFplData() for a full data refresh
+        const result = await syncFplData();
         return NextResponse.json(result);
     } catch (error) {
-        console.error('Error in active gameweek update:', error);
+        console.error('Error in FPL data sync:', error);
         return NextResponse.json(
             {
                 success: false,

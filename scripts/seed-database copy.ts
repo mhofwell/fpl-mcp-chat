@@ -2,9 +2,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { fplApiService } from '../lib/fpl-api/service';
 import dotenv from 'dotenv';
-import { Gameweek, Player, Team, Fixture } from '@/types/fpl';
-import { PlayerDetailResponse } from '@/types/fpl-api-responses';
-
 // Load environment variables
 dotenv.config({ path: '.env.local' });
 
@@ -19,18 +16,15 @@ if (!supabaseUrl || !supabaseServiceKey) {
 // Create Supabase client with service role key for admin access
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-// Maximum batch size for database operations
-const BATCH_SIZE = 50;
-
 async function seedDatabase() {
     console.log('Starting database seed process...');
     try {
         // Step 1: Get all data from FPL API
         console.log('Fetching data from FPL API...');
-        const teams: Team[] = await fplApiService.getTeams();
-        const players: Player[] = await fplApiService.getPlayers();
-        const gameweeks: Gameweek[] = await fplApiService.getGameweeks();
-        const fixtures: Fixture[] = await fplApiService.getFixtures();
+        const teams = await fplApiService.getTeams();
+        const players = await fplApiService.getPlayers();
+        const gameweeks = await fplApiService.getGameweeks();
+        const fixtures = await fplApiService.getFixtures();
         console.log(
             `Fetched ${teams.length} teams, ${players.length} players, ${gameweeks.length} gameweeks, and ${fixtures.length} fixtures.`
         );
@@ -71,6 +65,7 @@ async function seedDatabase() {
 
         // Step 4: Insert or update players (in batches to avoid rate limits)
         console.log('Seeding players table...');
+        const BATCH_SIZE = 50;
         for (let i = 0; i < players.length; i += BATCH_SIZE) {
             const batch = players.slice(i, i + BATCH_SIZE).map((player) => ({
                 id: player.id,
@@ -100,18 +95,11 @@ async function seedDatabase() {
         for (let i = 0; i < fixtures.length; i += BATCH_SIZE) {
             const batch = fixtures.slice(i, i + BATCH_SIZE).map((fixture) => ({
                 id: fixture.id,
-                gameweek_id: fixture.gameweek_id || fixture.event,
-                home_team_id: fixture.home_team_id || fixture.team_h,
-                away_team_id: fixture.away_team_id || fixture.team_a,
+                gameweek_id: fixture.gameweek_id,
+                home_team_id: fixture.home_team_id,
+                away_team_id: fixture.away_team_id,
                 kickoff_time: fixture.kickoff_time,
                 finished: fixture.finished,
-                // Add scores for finished fixtures if available
-                team_h_score: fixture.finished && 'team_h_score' in fixture
-                    ? fixture.team_h_score
-                    : null,
-                team_a_score: fixture.finished && 'team_a_score' in fixture
-                    ? fixture.team_a_score
-                    : null,
                 last_updated: new Date().toISOString(),
             }));
             const { error } = await supabase.from('fixtures').upsert(batch);
@@ -129,156 +117,7 @@ async function seedDatabase() {
             await new Promise((resolve) => setTimeout(resolve, 1000));
         }
 
-        // Step 6: Insert historical player gameweek stats for completed gameweeks
-        console.log('Seeding player gameweek stats...');
-        const completedGameweeks = gameweeks.filter(
-            (gw: Gameweek) => gw.finished
-        );
-
-        for (const gameweek of completedGameweeks) {
-            console.log(`Processing historical stats for ${gameweek.name}...`);
-
-            try {
-                // Get live data for the completed gameweek
-                const liveData = await fplApiService.getLiveGameweek(
-                    gameweek.id
-                );
-
-                if (liveData && liveData.elements) {
-                    const playerStats = [];
-
-                    // Transform live data into player_gameweek_stats records
-                    for (const [elementId, data] of Object.entries(
-                        liveData.elements
-                    )) {
-                        const stats = data.stats;
-                        if (stats.minutes > 0) {
-                            // Only record if player played
-                            playerStats.push({
-                                player_id: parseInt(elementId),
-                                gameweek_id: gameweek.id,
-                                minutes: stats.minutes || 0,
-                                goals_scored: stats.goals_scored || 0,
-                                assists: stats.assists || 0,
-                                clean_sheets: stats.clean_sheets || 0,
-                                goals_conceded: stats.goals_conceded || 0,
-                                own_goals: stats.own_goals || 0,
-                                penalties_saved: stats.penalties_saved || 0,
-                                penalties_missed: stats.penalties_missed || 0,
-                                yellow_cards: stats.yellow_cards || 0,
-                                red_cards: stats.red_cards || 0,
-                                saves: stats.saves || 0,
-                                bonus: stats.bonus || 0,
-                                total_points: stats.total_points || 0,
-                                created_at: new Date().toISOString(),
-                            });
-                        }
-                    }
-
-                    // Insert stats in batches
-                    for (let i = 0; i < playerStats.length; i += BATCH_SIZE) {
-                        const batch = playerStats.slice(i, i + BATCH_SIZE);
-                        const { error } = await supabase
-                            .from('player_gameweek_stats')
-                            .upsert(batch, {
-                                onConflict: 'player_id, gameweek_id',
-                            });
-
-                        if (error) {
-                            console.error(
-                                `Error inserting player gameweek stats batch for ${gameweek.name}:`,
-                                error
-                            );
-                        } else {
-                            console.log(
-                                `Inserted ${batch.length} player gameweek stats for ${gameweek.name}`
-                            );
-                        }
-
-                        // Add a small delay
-                        await new Promise((resolve) =>
-                            setTimeout(resolve, 1000)
-                        );
-                    }
-                }
-            } catch (error) {
-                console.error(
-                    `Error processing live data for ${gameweek.name}:`,
-                    error
-                );
-                // Continue with next gameweek even if one fails
-            }
-        }
-
-        // Step 7: Create player season stats (aggregate from player history)
-        console.log('Generating player season stats...');
-        
-        // Get popular players (top selection %)
-        const popularPlayers = [...players]
-            .sort((a, b) => {
-                const aPercent = parseFloat(a.selected_by_percent || '0');
-                const bPercent = parseFloat(b.selected_by_percent || '0');
-                return bPercent - aPercent;
-            })
-            .slice(0, 20); // Top 20 most selected players
-            
-        const topPlayerIds = popularPlayers.map(player => player.id);
-        console.log(`Processing season stats for ${topPlayerIds.length} popular players`);
-
-        for (const playerId of topPlayerIds) {
-            try {
-                const playerDetail: PlayerDetailResponse = 
-                    await fplApiService.getPlayerDetail(playerId);
-                    
-                if (
-                    playerDetail &&
-                    playerDetail.history_past &&
-                    playerDetail.history_past.length > 0
-                ) {
-                    // Process past seasons data
-                    const pastSeasons = playerDetail.history_past;
-
-                    for (const season of pastSeasons) {
-                        const { error } = await supabase
-                            .from('player_season_stats')
-                            .upsert(
-                                {
-                                    player_id: playerId,
-                                    season: season.season_name,
-                                    minutes: season.minutes || 0,
-                                    goals_scored: season.goals_scored || 0,
-                                    assists: season.assists || 0,
-                                    clean_sheets: season.clean_sheets || 0,
-                                    total_points: season.total_points || 0,
-                                    created_at: new Date().toISOString(),
-                                },
-                                { onConflict: 'player_id, season' }
-                            );
-
-                        if (error) {
-                            console.error(
-                                `Error inserting season stats for player ${playerId}:`,
-                                error
-                            );
-                        } else {
-                            console.log(
-                                `Inserted season stats for player ${playerId}, season ${season.season_name}`
-                            );
-                        }
-                    }
-                }
-            } catch (playerError) {
-                console.error(
-                    `Error fetching details for player ${playerId}:`,
-                    playerError
-                );
-            }
-
-            // Add a delay between player requests to avoid API rate limits
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-        }
-
-        // Step 8: Create default profiles and preferences for existing users
+        // Step 6: Create default profiles and preferences for existing users
         console.log('Setting up user profiles and preferences...');
         const { data: users, error: usersError } =
             await supabase.auth.admin.listUsers();
@@ -347,7 +186,7 @@ async function seedDatabase() {
             }
         }
 
-        // Step 9: Initialize default chats for each user
+        // Step 7: Initialize some default chats for each user (optional)
         if (users && users.users) {
             console.log('Creating default chats for users...');
             for (const user of users.users) {

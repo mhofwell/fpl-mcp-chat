@@ -9,6 +9,12 @@ BEGIN
     DELETE FROM chats WHERE TRUE;
     DELETE FROM user_preferences WHERE TRUE;
     DELETE FROM profiles WHERE TRUE;
+    
+    -- Clear new historical stat tables
+    DELETE FROM player_gameweek_stats WHERE TRUE;
+    DELETE FROM player_season_stats WHERE TRUE;
+    
+    -- Clear core FPL data tables
     DELETE FROM fixtures WHERE TRUE;
     DELETE FROM players WHERE TRUE;
     DELETE FROM gameweeks WHERE TRUE;

@@ -23,6 +23,12 @@ BEGIN
     DROP TABLE IF EXISTS chats;
     DROP TABLE IF EXISTS user_preferences;
     DROP TABLE IF EXISTS profiles;
+    
+    -- Drop player_gameweek_stats and player_season_stats tables before players
+    DROP TABLE IF EXISTS player_gameweek_stats;
+    DROP TABLE IF EXISTS player_season_stats;
+    
+    -- Drop fixtures, players, gameweeks, teams as before
     DROP TABLE IF EXISTS fixtures;
     DROP TABLE IF EXISTS players;
     DROP TABLE IF EXISTS gameweeks;

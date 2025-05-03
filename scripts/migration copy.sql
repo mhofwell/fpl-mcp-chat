@@ -2,7 +2,7 @@
 -- Create extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Step 2: Set up the core FPL reference tables with selected historical data
+-- Step 2: Set up the core FPL reference tables (from your existing schema)
 CREATE TABLE IF NOT EXISTS teams (
     id INTEGER PRIMARY KEY,
     name VARCHAR(50) NOT NULL,
@@ -36,54 +36,13 @@ CREATE TABLE IF NOT EXISTS fixtures (
     away_team_id INTEGER REFERENCES teams(id),
     kickoff_time TIMESTAMP WITH TIME ZONE,
     finished BOOLEAN,
-    -- Historical match result data (only updated after matches finish)
-    team_h_score INTEGER,
-    team_a_score INTEGER,
     last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Add table for historical player performance by gameweek
-CREATE TABLE IF NOT EXISTS player_gameweek_stats (
-    id SERIAL PRIMARY KEY,
-    player_id INTEGER REFERENCES players(id),
-    gameweek_id INTEGER REFERENCES gameweeks(id),
-    minutes INTEGER DEFAULT 0,
-    goals_scored INTEGER DEFAULT 0,
-    assists INTEGER DEFAULT 0,
-    clean_sheets INTEGER DEFAULT 0,
-    goals_conceded INTEGER DEFAULT 0,
-    own_goals INTEGER DEFAULT 0,
-    penalties_saved INTEGER DEFAULT 0,
-    penalties_missed INTEGER DEFAULT 0,
-    yellow_cards INTEGER DEFAULT 0,
-    red_cards INTEGER DEFAULT 0,
-    saves INTEGER DEFAULT 0,
-    bonus INTEGER DEFAULT 0,
-    total_points INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(player_id, gameweek_id)
-);
-
--- Add table for season summary stats
-CREATE TABLE IF NOT EXISTS player_season_stats (
-    id SERIAL PRIMARY KEY,
-    player_id INTEGER REFERENCES players(id),
-    season VARCHAR(10) NOT NULL,
-    minutes INTEGER DEFAULT 0,
-    goals_scored INTEGER DEFAULT 0,
-    assists INTEGER DEFAULT 0,
-    clean_sheets INTEGER DEFAULT 0,
-    total_points INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(player_id, season)
 );
 
 -- Create indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_players_team_id ON players(team_id);
 CREATE INDEX IF NOT EXISTS idx_fixtures_gameweek_id ON fixtures(gameweek_id);
 CREATE INDEX IF NOT EXISTS idx_fixtures_teams ON fixtures(home_team_id, away_team_id);
-CREATE INDEX IF NOT EXISTS idx_player_gameweek_stats ON player_gameweek_stats(player_id, gameweek_id);
-CREATE INDEX IF NOT EXISTS idx_player_season_stats ON player_season_stats(player_id, season);
 
 -- Step 3: Set up user profiles and user preferences tables
 -- User profiles extend the auth.users table with additional information

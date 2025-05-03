@@ -49,12 +49,23 @@ async function updateDatabaseFromCache() {
 
     try {
         // Get all data from Redis cache (already formatted in our schema)
-        const [teams, players, gameweeks, fixtures] = await Promise.all([
+        const [teams, players, gameweeks, fplFixtures] = await Promise.all([
             fplApiService.getTeams(),
             fplApiService.getPlayers(),
             fplApiService.getGameweeks(),
             fplApiService.getFixtures(),
         ]);
+
+        // Convert FplFixture[] to Fixture[]
+        const fixtures: Fixture[] = fplFixtures.map(fixture => ({
+            id: fixture.id,
+            gameweek_id: fixture.event ?? 0,
+            home_team_id: fixture.team_h,
+            away_team_id: fixture.team_a,
+            kickoff_time: fixture.kickoff_time ?? '',
+            finished: fixture.finished,
+            last_updated: new Date().toISOString()
+        }));
 
         console.log(
             `Retrieved data from cache: ${teams.length} teams, ${players.length} players, ${gameweeks.length} gameweeks, ${fixtures.length} fixtures`
@@ -222,7 +233,22 @@ export async function checkForUpdates() {
                 await fplApiService.getLiveGameweek(currentGameweek.id);
 
                 // Also update fixtures to get latest match results
-                await fplApiService.getFixtures(currentGameweek.id);
+                const fplFixtures = await fplApiService.getFixtures(currentGameweek.id);
+                
+                // Convert FplFixture[] to Fixture[] format before handling
+                const fixtures: Fixture[] = fplFixtures.map(fixture => ({
+                    id: fixture.id,
+                    gameweek_id: fixture.event ?? 0,
+                    home_team_id: fixture.team_h,
+                    away_team_id: fixture.team_a,
+                    kickoff_time: fixture.kickoff_time ?? '',
+                    finished: fixture.finished,
+                    last_updated: new Date().toISOString()
+                }));
+                
+                // Update the database with the formatted fixtures
+                const supabase = await createClient();
+                await updateFixtures(supabase, fixtures);
             }
         }
 

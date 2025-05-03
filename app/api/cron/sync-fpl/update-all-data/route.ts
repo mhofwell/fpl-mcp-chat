@@ -1,4 +1,5 @@
-import { checkForUpdates, syncFplData } from '@/lib/fpl-api/fpl-data-sync';
+// app/api/cron/sync-fpl/update-all-data/route.ts
+import { syncFplData } from '@/lib/fpl-api/fpl-data-sync';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -9,15 +10,23 @@ export async function POST(request: Request) {
     }
 
     try {
+        console.log('Starting scheduled FPL data sync from Next.js cron job');
+        
         // Use syncFplData() for a full data refresh
         const result = await syncFplData();
-        return NextResponse.json(result);
+        
+        console.log('Completed FPL data sync from Next.js cron job');
+        return NextResponse.json({
+            ...result,
+            timestamp: new Date().toISOString()
+        });
     } catch (error) {
-        console.error('Error in FPL data sync:', error);
+        console.error('Error in FPL data sync from Next.js cron job:', error);
         return NextResponse.json(
             {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
+                timestamp: new Date().toISOString()
             },
             { status: 500 }
         );

@@ -24,6 +24,6 @@
       "@/*": ["./*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "../fpl-mcp-server/src/types/fpl copy.ts"],
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "../fpl-mcp-server/src/types/fpl copy.ts", "../fpl-mcp-server/src/types/fpl-api-responses copy.ts", "../fpl-mcp-server/src/types/cache copy.ts"],
   "exclude": ["node_modules"]
 }

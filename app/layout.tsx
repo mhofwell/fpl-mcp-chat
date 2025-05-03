@@ -6,6 +6,7 @@ import { SessionProvider } from '@/providers/session-provider';
 import { PreferencesProvider } from '@/providers/preferences-provider';
 import { SessionTimeoutModal } from '@/components/session/session-timeout-modal';
 import { Providers } from './providers';
+import { initializeFplService } from '@/lib/fpl-api/initialize';
 
 const defaultUrl = process.env.NEXT_PUBLIC_URL ?? 'http://localhost:3000';
 
@@ -20,6 +21,17 @@ const geistSans = Geist({
     display: 'swap',
     subsets: ['latin'],
 });
+
+// Only run the initialization in a server environment
+if (typeof window === 'undefined') {
+    // Run async but don't wait for it to complete to avoid blocking app startup
+    initializeFplService().catch((err) =>
+        console.error(
+            'Failed to initialize FPL service during app startup:',
+            err
+        )
+    );
+}
 
 export default function RootLayout({
     children,

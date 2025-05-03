@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { fplApiService } from '../lib/fpl-api/service';
 import dotenv from 'dotenv';
 import { Gameweek, Player, Team, Fixture } from '@/types/fpl';
-import { FplFixture, PlayerDetailResponse } from '@/types/fpl-api-responses';
+import { PlayerDetailResponse } from '@/types/fpl-api-responses';
 
 // Load environment variables
 dotenv.config({ path: '.env.local' });
@@ -30,9 +30,23 @@ async function seedDatabase() {
         const teams: Team[] = await fplApiService.getTeams();
         const players: Player[] = await fplApiService.getPlayers();
         const gameweeks: Gameweek[] = await fplApiService.getGameweeks();
-        const fplFixtures: FplFixture[] = await fplApiService.getFixtures();
+        const fplFixtures = await fplApiService.getFixtures();
+
+        // Convert FplFixture[] to Fixture[]
+        const fixtures: Fixture[] = fplFixtures.map((fixture) => ({
+            id: fixture.id,
+            gameweek_id: fixture.event ?? 0,
+            home_team_id: fixture.team_h,
+            away_team_id: fixture.team_a,
+            kickoff_time: fixture.kickoff_time ?? '',
+            finished: fixture.finished,
+            team_h_score: fixture.team_h_score,
+            team_a_score: fixture.team_a_score,
+            last_updated: new Date().toISOString(),
+        }));
+
         console.log(
-            `Fetched ${teams.length} teams, ${players.length} players, ${gameweeks.length} gameweeks, and ${fplFixtures.length} fixtures.`
+            `Fetched ${teams.length} teams, ${players.length} players, ${gameweeks.length} gameweeks, and ${fixtures.length} fixtures.`
         );
 
         // Step 2: Insert or update teams

@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { fplApiService } from '../lib/fpl-api/service';
 import dotenv from 'dotenv';
 import { Gameweek, Player, Team, Fixture } from '@/types/fpl';
-import { PlayerDetailResponse } from '@/types/fpl-api-responses';
+import { FplFixture, PlayerDetailResponse } from '@/types/fpl-api-responses';
 
 // Load environment variables
 dotenv.config({ path: '.env.local' });
@@ -30,9 +30,9 @@ async function seedDatabase() {
         const teams: Team[] = await fplApiService.getTeams();
         const players: Player[] = await fplApiService.getPlayers();
         const gameweeks: Gameweek[] = await fplApiService.getGameweeks();
-        const fixtures: Fixture[] = await fplApiService.getFixtures();
+        const fplFixtures: FplFixture[] = await fplApiService.getFixtures();
         console.log(
-            `Fetched ${teams.length} teams, ${players.length} players, ${gameweeks.length} gameweeks, and ${fixtures.length} fixtures.`
+            `Fetched ${teams.length} teams, ${players.length} players, ${gameweeks.length} gameweeks, and ${fplFixtures.length} fixtures.`
         );
 
         // Step 2: Insert or update teams
@@ -106,12 +106,14 @@ async function seedDatabase() {
                 kickoff_time: fixture.kickoff_time,
                 finished: fixture.finished,
                 // Add scores for finished fixtures if available
-                team_h_score: fixture.finished && 'team_h_score' in fixture
-                    ? fixture.team_h_score
-                    : null,
-                team_a_score: fixture.finished && 'team_a_score' in fixture
-                    ? fixture.team_a_score
-                    : null,
+                team_h_score:
+                    fixture.finished && 'team_h_score' in fixture
+                        ? fixture.team_h_score
+                        : null,
+                team_a_score:
+                    fixture.finished && 'team_a_score' in fixture
+                        ? fixture.team_a_score
+                        : null,
                 last_updated: new Date().toISOString(),
             }));
             const { error } = await supabase.from('fixtures').upsert(batch);
@@ -212,7 +214,7 @@ async function seedDatabase() {
 
         // Step 7: Create player season stats (aggregate from player history)
         console.log('Generating player season stats...');
-        
+
         // Get popular players (top selection %)
         const popularPlayers = [...players]
             .sort((a, b) => {
@@ -221,15 +223,17 @@ async function seedDatabase() {
                 return bPercent - aPercent;
             })
             .slice(0, 20); // Top 20 most selected players
-            
-        const topPlayerIds = popularPlayers.map(player => player.id);
-        console.log(`Processing season stats for ${topPlayerIds.length} popular players`);
+
+        const topPlayerIds = popularPlayers.map((player) => player.id);
+        console.log(
+            `Processing season stats for ${topPlayerIds.length} popular players`
+        );
 
         for (const playerId of topPlayerIds) {
             try {
-                const playerDetail: PlayerDetailResponse = 
+                const playerDetail: PlayerDetailResponse =
                     await fplApiService.getPlayerDetail(playerId);
-                    
+
                 if (
                     playerDetail &&
                     playerDetail.history_past &&

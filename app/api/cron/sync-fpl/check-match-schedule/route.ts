@@ -7,7 +7,7 @@ export async function GET() {
 
     // Get next 24hr matches
     const next24hrs = fixtures.filter((f) => {
-        const kickoff = new Date(f.kickoff_time);
+        const kickoff = new Date(f.kickoff_time || '');
         return (
             kickoff > new Date() &&
             kickoff < new Date(Date.now() + 24 * 60 * 60 * 1000)

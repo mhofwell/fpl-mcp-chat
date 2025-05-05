@@ -27,3 +27,8 @@ command = "curl -X POST -H 'Authorization: Bearer $CRON_SECRET' $RAILWAY_PUBLIC_
 [[cron]]
 schedule = "*/15 * * * *"
 command = "curl -X POST -H 'Authorization: Bearer $CRON_SECRET' $RAILWAY_PUBLIC_DOMAIN/api/cron/sync-fpl/active-gameweek"
+
+# Schedule manager update - runs daily at 1:00 AM UTC
+[[cron]]
+schedule = "0 1 * * *"
+command = "curl -X POST -H 'Authorization: Bearer $CRON_SECRET' $RAILWAY_PUBLIC_DOMAIN/api/cron/schedule/update"

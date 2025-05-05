@@ -148,6 +148,34 @@ CREATE TABLE IF NOT EXISTS system_meta (
 CREATE INDEX idx_refresh_logs_type ON refresh_logs(type);
 CREATE INDEX idx_refresh_logs_created_at ON refresh_logs(created_at);
 
+-- Create table for dynamic cron schedule
+CREATE TABLE dynamic_cron_schedule (
+  id SERIAL PRIMARY KEY,
+  job_type VARCHAR(50) NOT NULL, -- 'live-update', 'post-match'
+  start_time TIMESTAMP NOT NULL,
+  end_time TIMESTAMP NOT NULL,
+  match_ids INTEGER[] NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create index for faster queries
+CREATE INDEX IF NOT EXISTS idx_dynamic_cron_schedule_job_type ON dynamic_cron_schedule(job_type);
+CREATE INDEX IF NOT EXISTS idx_dynamic_cron_schedule_timerange ON dynamic_cron_schedule(start_time, end_time);
+
+-- Create system config table if it doesn't exist
+CREATE TABLE IF NOT EXISTS system_config (
+  key VARCHAR(100) PRIMARY KEY,
+  value TEXT NOT NULL,
+  description TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Insert default config values
+INSERT INTO system_config (key, value, description)
+VALUES
+  ('enable_dynamic_scheduling', 'true', 'Enable dynamic scheduling of cron jobs based on fixture times')
+ON CONFLICT (key) DO NOTHING; 
+
 -- Step 5: Row Level Security policies to secure the data
 -- Enable Row Level Security for all tables
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;

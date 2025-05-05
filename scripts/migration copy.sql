@@ -129,24 +129,6 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_chats_user_id ON chats(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
 
--- In your Supabase SQL editor
-CREATE TABLE IF NOT EXISTS refresh_logs (
-  id SERIAL PRIMARY KEY,
-  type VARCHAR(50) NOT NULL,
-  state VARCHAR(50) NOT NULL,
-  details JSONB,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS system_meta (
-  key VARCHAR(50) PRIMARY KEY,
-  value TEXT,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Create index on refresh_logs for better query performance
-CREATE INDEX idx_refresh_logs_type ON refresh_logs(type);
-CREATE INDEX idx_refresh_logs_created_at ON refresh_logs(created_at);
 
 -- Step 5: Row Level Security policies to secure the data
 -- Enable Row Level Security for all tables

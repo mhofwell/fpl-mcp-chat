@@ -1,6 +1,7 @@
-// app/api/cron/sync-fpl/update-all-data/route.ts
-import { syncFplData } from '@/lib/fpl-api/fpl-data-sync';
+// app/api/cron/sync-fpl/live/route.ts
+
 import { NextResponse } from 'next/server';
+import { refreshManager } from '@/lib/fpl-api/refresh-manager';
 
 export async function POST(request: Request) {
     // Verify authentication token for cron service
@@ -10,30 +11,30 @@ export async function POST(request: Request) {
     }
 
     try {
-        console.log('Starting scheduled FPL data sync from Next.js cron job');
-        
-        // Use syncFplData() for a full data refresh
-        const result = await syncFplData();
-        
-        console.log('Completed FPL data sync from Next.js cron job');
+        console.log('Starting FPL live data refresh');
+
+        // Perform live refresh
+        const result = await refreshManager.performLiveRefresh();
+
         return NextResponse.json({
+            success: true,
             ...result,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
         });
     } catch (error) {
-        console.error('Error in FPL data sync from Next.js cron job:', error);
+        console.error('Error in live refresh:', error);
         return NextResponse.json(
             {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
             },
             { status: 500 }
         );
     }
 }
 
-// Also allow GET requests for manual triggering (with proper authentication)
+// Also allow GET requests for manual triggering (with authentication)
 export async function GET(request: Request) {
     return POST(request);
 }

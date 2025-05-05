@@ -22,16 +22,18 @@ const geistSans = Geist({
     subsets: ['latin'],
 });
 
+
+// this is a problem we have to create a route or execute this not at the module level
 // Only run the initialization in a server environment
-if (typeof window === 'undefined') {
-    // Run async but don't wait for it to complete to avoid blocking app startup
-    initializeFplService().catch((err) =>
-        console.error(
-            'Failed to initialize FPL service during app startup:',
-            err
-        )
-    );
-}
+// if (typeof window === 'undefined') {
+//     // Run async but don't wait for it to complete to avoid blocking app startup
+//     initializeFplService().catch((err) =>
+//         console.error(
+//             'Failed to initialize FPL service during app startup:',
+//             err
+//         )
+//     );
+// }
 
 export default function RootLayout({
     children,

@@ -1,4 +1,4 @@
-// app/api/cron/sync-fpl/live/route.ts
+// app/api/cron/sync-fpl/live-updates/route.ts
 
 import { NextResponse } from 'next/server';
 import { refreshManager } from '@/lib/fpl-api/refresh-manager';

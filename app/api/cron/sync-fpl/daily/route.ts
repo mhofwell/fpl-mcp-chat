@@ -3,6 +3,8 @@
 import { NextResponse } from 'next/server';
 import { refreshManager } from '@/lib/fpl-api/refresh-manager';
 
+// full refresh is the same as daily refresh
+
 export async function POST(request: Request) {
     // Verify authentication token for cron service
     const authHeader = request.headers.get('Authorization');
